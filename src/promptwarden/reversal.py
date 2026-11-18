@@ -261,28 +261,58 @@ def _loose_deleet(text: str) -> str:
     return _LOOSE_LEET.sub(replace, text)
 
 
-def _segment(text: str) -> str:
-    def split(token: str) -> str:
-        if len(token) < 8 or len(token) > _SEGMENT_MAX:
-            return token
-        best: list[list[str] | None] = [None] * (len(token) + 1)
-        best[0] = []
-        for index, pieces in enumerate(best):
-            if pieces is None:
-                continue
-            for word in _VOCAB:
-                end = index + len(word)
-                if end <= len(token) and token.startswith(word, index):
-                    candidate = pieces + [word]
-                    current = best[end]
-                    if current is None or len(candidate) < len(current):
-                        best[end] = candidate
-        done = best[-1]
-        if done is None or len(done) < 2:
-            return token
-        return " ".join(done)
+def segment_token(
+    token: str,
+    vocab: tuple[str, ...],
+    *,
+    max_len: int = _SEGMENT_MAX,
+    min_len: int = 8,
+) -> str:
+    """Split one fused token. Unchanged unless two or more words cover it."""
 
-    return _TOKEN.sub(lambda match: split(match.group(0)), text)
+    if len(token) < min_len or len(token) > max_len:
+        return token
+    best: list[list[str] | None] = [None] * (len(token) + 1)
+    best[0] = []
+    for index, pieces in enumerate(best):
+        if pieces is None:
+            continue
+        for word in vocab:
+            end = index + len(word)
+            if end <= len(token) and token.startswith(word, index):
+                candidate = pieces + [word]
+                current = best[end]
+                if current is None or len(candidate) < len(current):
+                    best[end] = candidate
+    done = best[-1]
+    if done is None or len(done) < 2:
+        return token
+    return " ".join(done)
+
+
+def segment_fused(
+    text: str,
+    *,
+    vocab: tuple[str, ...] | None = None,
+    max_len: int = _SEGMENT_MAX,
+) -> str:
+    """Split fused ASCII tokens into ``vocab`` words when the whole token is covered.
+
+    A token is left unchanged unless every character belongs to at least two
+    vocabulary words. Ordinary words are not cut open. ``max_len`` bounds the
+    dynamic program.
+    """
+
+    words = _VOCAB if vocab is None else vocab
+
+    def split(match: re.Match[str]) -> str:
+        return segment_token(match.group(0), words, max_len=max_len)
+
+    return _TOKEN.sub(split, text)
+
+
+def _segment(text: str) -> str:
+    return segment_fused(text)
 
 
 @dataclass(frozen=True)

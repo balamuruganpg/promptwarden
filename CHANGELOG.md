@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0 — 2026-11-18
+
+- Add composed instruction views (`compose.py`). A de-spaced reading of reversed text, a reversed reading of de-leeted text, and a second standard-base64 decode now feed the same decisive instruction patterns as the direct view. Context masking runs on every reading, before and after the repair. The shared normalizer, n-grams, PII checks, and the bundled classifier are unchanged. The model was not refit.
+- Measured on a fixed depth-2 set: every ordered pair of TrustBreaker's shipped operators, applied to the 81 corpus injection rows. A variant counts when v0.5.0 flags the original and the pipeline changes the text (9,056 applicable). Bypass is an applicable variant this scanner does not flag. Aggregates only.
+
+| Composition family | v0.5.0 bypass | v0.6.0 bypass |
+|---|---:|---:|
+| Depth-2 overall | 30.80% (2,789/9,056) | 11.36% (1,029/9,056) |
+| Reversal∘spacing | 63.73% (195/306) | 20.59% (63/306) |
+| Reversal∘leet | 30.13% (94/312) | 27.56% (86/312) |
+| Leet∘spacing | 88.46% (138/156) | 30.77% (48/156) |
+| Leet∘punctuation splits | 75.64% (118/156) | 30.77% (48/156) |
+| Nested base64 | 100% (78/78) | 7.69% (6/78) |
+| Base64∘spacing | 76.28% (119/156) | 14.10% (22/156) |
+| Base64∘punctuation splits | 58.97% (92/156) | 14.74% (23/156) |
+| Base64∘leet | 80.77% (126/156) | 64.10% (100/156) |
+| Reversal∘synonym | 6.54% (20/306) | 6.54% (20/306) |
+
+- The six remaining nested-base64 misses are injections no decisive rule names. A composed or decoded view cannot add a classifier-only hit. `b64_wrap` then `leet`, and `b64_wrap` then `case_mix`, stay at 78/78: both destroy base64 bits, and the repair does not guess them.
+- Corpus operating point is unchanged at threshold 0.5. Full benchmark: precision 0.9626, recall 0.8512, F1 0.9035, FPR 0.0667, injection recall 0.9630 (78/81), PII recall 0.6250, TP/FP/TN/FN 103/4/56/18. Held out (seed 13, 91 rows): precision 0.9630, recall 0.8525, F1 0.9043, FPR 0.0667, injection recall 0.9756, PII recall 0.6000, 52/2/28/9.
+- Replaying the fixed 2,960 variants from the v0.3.0 TrustBreaker run: overall bypass 42.91% → 19.22% (1,270/2,960 → 569/2,960). char_reverse 34.93% (248/710) → 16.62% (118/710). word_reverse 33.24% (236/710) → 19.58% (139/710).
+- Still open: synonym substitution (no inverse map), leet or case-mixing inside a base64 blob, a third encoding layer, URL-safe base64, the 4096-character decode cap, word-order-only system fences, and PII on reversed text. Percent-encoding and hex stay single-pass, so `%2520` does not become a second unescape. Some spaced base64 carriers still rejoin to an alphabet whose length is not a multiple of 4.
+
 ## 0.5.0 — 2026-11-19
 
 - Add a reversal pass (`reversal.py`): alongside the existing normalized view, the scanner now evaluates character-reversed and word-reversed views of the input through the rule layer, but a reversed view may only contribute a decisive instruction pattern — the signal families the direct view treats as conclusive — never a weak or classifier-only signal. Context masking applies to the reversed views exactly as to the direct view, so quoted reversed text in benign prose stays quiet. The bundled classifier and its training are unchanged.

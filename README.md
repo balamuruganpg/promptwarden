@@ -1,9 +1,9 @@
 <h1 align="center">🛡️ PromptWarden</h1>
 <p align="center">First-stage scan for <strong>prompt injection</strong> and <strong>sensitive-data leakage</strong> — rules + a learned classifier, stdlib only.</p>
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.5.0-blue" alt="Version 0.5.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.6.0-blue" alt="Version 0.6.0"></a>
   <a href="https://github.com/balamuruganpg/promptwarden/actions/workflows/ci.yml"><img src="https://github.com/balamuruganpg/promptwarden/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/tests-228%20passed-brightgreen" alt="228 tests passed">
+  <img src="https://img.shields.io/badge/tests-335%20passed-brightgreen" alt="335 tests passed">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/dependencies-stdlib%20only-blue" alt="stdlib only">
@@ -70,9 +70,9 @@ ScanResult(score=0.01597712105541302, flagged=False, categories=(), signals=())
 | ✓ What it catches | ⚠ What it misses / costs |
 |---|---|
 | Instruction override, role hijack, system-prompt extraction, fake system turns, fences, chat-template tokens, urgency/secrecy | Novel phrasings / paraphrases; lexical rules and hashed n-grams are not a semantic guarantee. |
-| Finite Cyrillic/Greek homoglyph folds, zero-width stripping, and bounded patterns for twelve additional languages | Arbitrary translations, unsupported lookalikes, spaced letters and leetspeak. |
+| Finite Cyrillic/Greek homoglyph folds, zero-width stripping, bounded patterns for twelve additional languages, and composed spacing, leetspeak, and reversal on decisive instruction views | Arbitrary translations, unsupported lookalikes, and synonym substitution. |
 | Luhn-valid cards, Verhoeff-valid Aadhaar; email, phone (including Indian mobiles), PAN, API-key shapes and private-key headers | Low-signal PII without supported shapes or checksums; addresses, passwords, SSNs and obfuscated identifiers. |
-| Base64, hex and percent-escaped text that decodes to a supported instruction | Nested encodings or instructions beyond the decoding cap. |
+| Base64, including one nested wrapper, plus hex and percent-escaped text that decodes to a supported instruction. Spaces, hyphens, marks, and lookalikes inside a standard base64 blob are repaired first | URL-safe base64, a third encoding layer, leet or case-mixing inside a blob, and instructions beyond the decoding cap. Percent-encoding and hex stay single-pass. |
 | Bounded context for explicitly reported quotes and local negation | Reporting language can still mislead a lexical scanner. Control syntax, encoded instructions and PII shapes can flag in documentation. |
 
 [Exact patterns, weights and limits →](SPEC.md). Flagging is not redaction or credential validation.
@@ -141,6 +141,7 @@ Categories name fired rule families **only when flagged**. Classifier-only flags
 | v0.3.0 | 0.9706 | 0.8182 | 0.8879 | 0.0500 | 0.9136 | 0.6250 | 99 / 3 / 57 / 22 |
 | v0.4.0 | 0.9615 | 0.8264 | 0.8889 | 0.0667 | 0.9259 | 0.6250 | 100 / 4 / 56 / 21 |
 | v0.5.0 | 0.9626 | 0.8512 | 0.9035 | 0.0667 | 0.9630 | 0.6250 | 103 / 4 / 56 / 18 |
+| v0.6.0 | 0.9626 | 0.8512 | 0.9035 | 0.0667 | 0.9630 | 0.6250 | 103 / 4 / 56 / 18 |
 
 **Held-out corpus (91 rows, good-not-pristine).** These rows were excluded from fitting and inspected during development.
 
@@ -151,12 +152,15 @@ Categories name fired rule families **only when flagged**. Classifier-only flags
 | v0.3.0 | 0.9800 | 0.8033 | 0.8829 | 0.0333 | 0.9024 | 0.6000 | 49 / 1 / 29 / 12 |
 | v0.4.0 | 0.9608 | 0.8033 | 0.8750 | 0.0667 | 0.9024 | 0.6000 | 49 / 2 / 28 / 12 |
 | v0.5.0 | 0.9630 | 0.8525 | 0.9043 | 0.0667 | 0.9756 | 0.6000 | 52 / 2 / 28 / 9 |
+| v0.6.0 | 0.9630 | 0.8525 | 0.9043 | 0.0667 | 0.9756 | 0.6000 | 52 / 2 / 28 / 9 |
 
 v0.3.0 catches 74 of 81 injection rows, including all 50 v0.2.0 hits. All three remaining benign flags come from PII shapes in documentation or test text. Rules alone and the retrained bundle flag the same benchmark rows at 0.5.
 
 v0.4.0 catches 75 of 81. Its reason to exist is evasion resistance, measured by [TrustBreaker](https://github.com/balamuruganpg/trustbreaker): replaying the fixed set of 2,960 mutations that TrustBreaker generated against v0.3.0 (88.28% bypassed it), **71.72% bypass v0.4.0** — robustness on that set rose from 11.72% to 28.28%. The cost is visible above: full-corpus FPR 0.0500 → 0.0667 and held-out FPR 0.0333 → 0.0667. Character/word reversal and multi-layer encodings remain open, by the CHANGELOG's account.
 
-v0.5.0 catches 78 of 81 and closes most of the reversal gap: it also evaluates character- and word-reversed views of the input, but a reversed view may only contribute a *decisive* instruction pattern, with the same context masking as the direct view — so benign prose quoting reversed text stays quiet, and FPR does not move (0.0667 on both corpora). On the same fixed TrustBreaker set, char_reverse bypass falls 86.48% → 34.93% and word_reverse 91.97% → 33.24%. Still open: reversal composed with spacing or synonyms, nested encodings, and non-Latin hyphen splits (CHANGELOG has the full list).
+v0.5.0 catches 78 of 81 and closes most of the reversal gap: it also evaluates character- and word-reversed views of the input, but a reversed view may only contribute a *decisive* instruction pattern, with the same context masking as the direct view — so benign prose quoting reversed text stays quiet, and FPR does not move (0.0667 on both corpora). On the same fixed TrustBreaker set, char_reverse bypass falls 86.48% → 34.93% and word_reverse 91.97% → 33.24%.
+
+v0.6.0 keeps that corpus operating point (full F1 0.9035, FPR 0.0667; held-out F1 0.9043, FPR 0.0667). The bundled model was not refit. Composed views repair stacks the single normalize-then-reverse pass missed: de-spaced readings of reversed text, reversed readings of de-leeted text, and a second standard-base64 decode, still decisive-only and still masked. On a fixed depth-2 set of 9,056 applicable variants, bypass falls 30.80% → 11.36%. Reversal∘spacing falls 63.73% → 20.59%, leet∘spacing 88.46% → 30.77%, and nested base64 100% → 7.69%. On the same 2,960-variant replay, char_reverse falls 34.93% → 16.62% and word_reverse 33.24% → 19.58%. Still open: synonym substitution, leet or case-mixing inside base64, a third encoding layer, URL-safe base64, the 4096-character cap, word-order-only system fences, and reversed PII (CHANGELOG has the per-family table).
 
 <details>
 <summary>Historical v0.1.0 → v0.2.0 benchmark and FPR tradeoff (holdout good-not-pristine)</summary>

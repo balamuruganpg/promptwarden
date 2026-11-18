@@ -267,10 +267,10 @@ v0.3.0 covers the English and twelve additional-language constructions above, th
 Known limits, measured or structural:
 
 - Reported prose may resemble an instruction closely enough to flag. A real instruction may resemble inert reporting closely enough to be masked. Control syntax and encoded instruction examples can flag in documentation.
-- Other language constructions and unmapped homoglyphs can pass. Removing U+200C/U+200D and folding lookalikes is lossy for genuine native-language text. Spaced or punctuated letters, fullwidth and diacritic substitutions, leetspeak, reversed text and reordered words can evade the rules.
+- Other language constructions and unmapped homoglyphs can pass. Removing U+200C/U+200D and folding lookalikes is lossy for genuine native-language text. Fullwidth substitutions can evade the rules. v0.6.0 repairs single-letter spacing, short punctuation splits, leetspeak, and reversal on decisive instruction views, including a second transform stacked on the first. Synonym substitution is not inverted. A system fence is not checked on a word-order view.
 - Aadhaar and card checks reject format-only matches. A different 12-digit or 13–19 digit string that happens to satisfy the checksum still fires. Random digit strings pass Verhoeff or Luhn about one time in ten.
 - API-key signals are shapes. `AKIAIOSFODNN7EXAMPLE` is the AWS documentation sample and it fires, because the shape matches.
-- URL-safe base64, nested encodings and instructions beyond the 4096-character decoding cap can pass.
+- URL-safe base64, a third encoding layer, leet or case-mixing inside a base64 blob, and instructions beyond the 4096-character decoding cap can pass. A second standard base64 layer is decoded. Percent-encoding and hex stay single-pass.
 - Hashed n-grams collide in 256 buckets. The bundled linear model fits 138 rows and uses a conservative intercept shift. Lexical matches and classifier scores provide limited coverage of new paraphrases.
 - PII detection is intentionally on original text. Obfuscated identifiers (including zero-width characters within an identifier) and unsupported shapes such as addresses, passwords, SSNs, IBANs, and passports may be missed.
 - The scanner does not know who wrote the text. A system prompt, a user message, and a tool result are scored the same way.
