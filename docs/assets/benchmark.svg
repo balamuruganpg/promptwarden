@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="588" viewBox="0 0 960 588" class="viz-root" role="img" aria-labelledby="chart-title chart-desc">
+<title id="chart-title">PromptWarden: more recall, with a false-positive cost</title>
+<desc id="chart-desc">Grouped horizontal bars on one common 0–1 axis. Injection recall: v0.1.0 0.2963, v0.2.0 0.6173; F1: v0.1.0 0.5537, v0.2.0 0.7282; False-positive rate: v0.1.0 0.1167, v0.2.0 0.1667. False-positive rate is worse when higher: benign flags rise from 7 to 10. Full 181 rows include fitting data; descriptive, not an independent generalization estimate. The holdout was inspected during development, not a blind external test. Source: README.md audited benchmark; recorded reports dated 2026-11-17, threshold 0.5. The README provides the full data table and counts.</desc>
+<style>
+.viz-root {
+  color-scheme: light;
+  --surface: #fcfcfb;
+  --primary: #0b0b0b;
+  --secondary: #52514e;
+  --grid: #e1e0d9;
+  --baseline: #c3c2b7;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --texture-1: #104281;
+  --texture-2: #d95926;
+}
+@media (prefers-color-scheme: dark) {
+  .viz-root {
+    color-scheme: dark;
+    --surface: #1a1a19;
+    --primary: #f0efec;
+    --secondary: #c3c2b7;
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --texture-1: #9ec5f4;
+    --texture-2: #eb6834;
+  }
+}
+text {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  fill: var(--primary);
+}
+.heading { font-size: 29px; font-weight: 650; }
+.metric { font-size: 18px; font-weight: 650; }
+.secondary, .version, .tick { fill: var(--secondary); }
+.hint, .version, .tick { font-size: 14px; }
+.value { font-size: 16px; font-weight: 650; }
+.tick, .value { font-variant-numeric: tabular-nums; }
+.frame, .tooltip-bg { fill: var(--surface); }
+.grid { stroke: var(--grid); stroke-width: 1; }
+.baseline { stroke: var(--baseline); stroke-width: 1; }
+.series-1 { fill: var(--series-1); }
+.series-2 { fill: var(--series-2); }
+.hit { fill: transparent; }
+.bar { outline: none; }
+.bar:hover .mark, .bar:focus .mark { opacity: 0.8; }
+.bar:focus .hit { stroke: var(--primary); stroke-width: 1; }
+.tooltip { visibility: hidden; pointer-events: none; }
+.tooltip-bg { stroke: var(--baseline); stroke-width: 1; }
+.bar:hover .tooltip, .bar:focus .tooltip { visibility: visible; }
+.texture { display: none; pointer-events: none; }
+@media print {
+  .viz-root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --primary: #0b0b0b;
+    --secondary: #52514e;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --texture-1: #104281;
+    --texture-2: #d95926;
+  }
+  .texture { display: inline; }
+}
+@media (forced-colors: active) {
+  .viz-root { forced-color-adjust: none; }
+  .texture { display: inline; }
+}
+</style>
+<defs>
+<pattern id="texture-1" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+<path d="M 0 0 V 8" stroke="var(--texture-1)" stroke-width="2"/>
+</pattern>
+<pattern id="texture-2" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(135)">
+<path d="M 0 0 V 8" stroke="var(--texture-2)" stroke-width="2"/>
+</pattern></defs>
+<rect class="frame" width="960" height="588" rx="20"/>
+<text x="32" y="46" class="heading" text-anchor="start">More recall, with a false-positive cost</text>
+<text x="32" y="76" class="secondary" text-anchor="start">Audited benchmark · full 181 rows · public threshold 0.5 · 2026-11-17</text>
+<rect class="series-1" x="32" y="99" width="18" height="12" rx="2"/>
+<text x="60" y="111" class="secondary" text-anchor="start">v0.1.0</text>
+<rect class="series-2" x="274" y="99" width="18" height="12" rx="2"/>
+<text x="302" y="111" class="secondary" text-anchor="start">v0.2.0</text>
+<text x="888" y="111" class="secondary hint" text-anchor="end">Score / rate · 0–1</text>
+<line class="baseline" x1="248" x2="248" y1="178" y2="458"/>
+<text x="248" y="482" class="tick" text-anchor="middle">0.00</text>
+<line class="grid" x1="408" x2="408" y1="178" y2="458"/>
+<text x="408" y="482" class="tick" text-anchor="middle">0.25</text>
+<line class="grid" x1="568" x2="568" y1="178" y2="458"/>
+<text x="568" y="482" class="tick" text-anchor="middle">0.50</text>
+<line class="grid" x1="728" x2="728" y1="178" y2="458"/>
+<text x="728" y="482" class="tick" text-anchor="middle">0.75</text>
+<line class="grid" x1="888" x2="888" y1="178" y2="458"/>
+<text x="888" y="482" class="tick" text-anchor="middle">1.00</text>
+<text x="32" y="156" class="metric" text-anchor="start">Injection recall</text>
+<text x="32" y="179" class="secondary hint" text-anchor="start">Higher is better</text>
+<g class="bar" tabindex="0" role="img" aria-label="v0.1.0 · Injection recall: 0.2963. Higher is better.">
+<title>v0.1.0 · Injection recall: 0.2963. Higher is better.</title>
+<path class="mark series-1" d="M 248 188 h 185.632 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<path class="texture" fill="url(#texture-1)" d="M 248 188 h 185.632 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<rect class="hit" x="246" y="184" width="193.632" height="28"/>
+<text x="232" y="203" class="version" text-anchor="end">v0.1.0</text>
+<g class="tooltip" aria-hidden="true" transform="translate(608 126)">
+<rect class="tooltip-bg" width="280" height="60" rx="8"/>
+<text x="14" y="24" class="value" text-anchor="start">0.2963</text>
+<text x="14" y="46" class="secondary hint" text-anchor="start">v0.1.0 · Injection recall</text>
+</g></g>
+<g class="bar" tabindex="0" role="img" aria-label="v0.2.0 · Injection recall: 0.6173. Higher is better.">
+<title>v0.2.0 · Injection recall: 0.6173. Higher is better.</title>
+<path class="mark series-2" d="M 248 216 h 391.072 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<path class="texture" fill="url(#texture-2)" d="M 248 216 h 391.072 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<rect class="hit" x="246" y="212" width="399.072" height="28"/>
+<text x="232" y="231" class="version" text-anchor="end">v0.2.0</text>
+<text x="653.072" y="231" class="value" text-anchor="start">0.6173</text>
+<g class="tooltip" aria-hidden="true" transform="translate(608 154)">
+<rect class="tooltip-bg" width="280" height="60" rx="8"/>
+<text x="14" y="24" class="value" text-anchor="start">0.6173</text>
+<text x="14" y="46" class="secondary hint" text-anchor="start">v0.2.0 · Injection recall</text>
+</g></g>
+<text x="32" y="264" class="metric" text-anchor="start">F1</text>
+<text x="32" y="287" class="secondary hint" text-anchor="start">Higher is better</text>
+<g class="bar" tabindex="0" role="img" aria-label="v0.1.0 · F1: 0.5537. Higher is better.">
+<title>v0.1.0 · F1: 0.5537. Higher is better.</title>
+<path class="mark series-1" d="M 248 296 h 350.368 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<path class="texture" fill="url(#texture-1)" d="M 248 296 h 350.368 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<rect class="hit" x="246" y="292" width="358.368" height="28"/>
+<text x="232" y="311" class="version" text-anchor="end">v0.1.0</text>
+<g class="tooltip" aria-hidden="true" transform="translate(608 234)">
+<rect class="tooltip-bg" width="280" height="60" rx="8"/>
+<text x="14" y="24" class="value" text-anchor="start">0.5537</text>
+<text x="14" y="46" class="secondary hint" text-anchor="start">v0.1.0 · F1</text>
+</g></g>
+<g class="bar" tabindex="0" role="img" aria-label="v0.2.0 · F1: 0.7282. Higher is better.">
+<title>v0.2.0 · F1: 0.7282. Higher is better.</title>
+<path class="mark series-2" d="M 248 324 h 462.048 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<path class="texture" fill="url(#texture-2)" d="M 248 324 h 462.048 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<rect class="hit" x="246" y="320" width="470.048" height="28"/>
+<text x="232" y="339" class="version" text-anchor="end">v0.2.0</text>
+<text x="724.048" y="339" class="value" text-anchor="start">0.7282</text>
+<g class="tooltip" aria-hidden="true" transform="translate(608 262)">
+<rect class="tooltip-bg" width="280" height="60" rx="8"/>
+<text x="14" y="24" class="value" text-anchor="start">0.7282</text>
+<text x="14" y="46" class="secondary hint" text-anchor="start">v0.2.0 · F1</text>
+</g></g>
+<text x="32" y="372" class="metric" text-anchor="start">False-positive rate</text>
+<text x="32" y="395" class="secondary hint" text-anchor="start">Lower is better</text>
+<g class="bar" tabindex="0" role="img" aria-label="v0.1.0 · False-positive rate: 0.1167. Lower is better · more benign flags after tuning.">
+<title>v0.1.0 · False-positive rate: 0.1167. Lower is better · more benign flags after tuning.</title>
+<path class="mark series-1" d="M 248 404 h 70.688 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<path class="texture" fill="url(#texture-1)" d="M 248 404 h 70.688 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<rect class="hit" x="246" y="400" width="78.688" height="28"/>
+<text x="232" y="419" class="version" text-anchor="end">v0.1.0</text>
+<g class="tooltip" aria-hidden="true" transform="translate(608 342)">
+<rect class="tooltip-bg" width="280" height="60" rx="8"/>
+<text x="14" y="24" class="value" text-anchor="start">0.1167</text>
+<text x="14" y="46" class="secondary hint" text-anchor="start">v0.1.0 · False-positive rate</text>
+</g></g>
+<g class="bar" tabindex="0" role="img" aria-label="v0.2.0 · False-positive rate: 0.1667. Lower is better · more benign flags after tuning.">
+<title>v0.2.0 · False-positive rate: 0.1667. Lower is better · more benign flags after tuning.</title>
+<path class="mark series-2" d="M 248 432 h 102.688 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<path class="texture" fill="url(#texture-2)" d="M 248 432 h 102.688 a 4 4 0 0 1 4 4 v 12 a 4 4 0 0 1 -4 4 H 248 Z"/>
+<rect class="hit" x="246" y="428" width="110.688" height="28"/>
+<text x="232" y="447" class="version" text-anchor="end">v0.2.0</text>
+<text x="364.688" y="447" class="value" text-anchor="start">0.1667</text>
+<g class="tooltip" aria-hidden="true" transform="translate(608 370)">
+<rect class="tooltip-bg" width="280" height="60" rx="8"/>
+<text x="14" y="24" class="value" text-anchor="start">0.1667</text>
+<text x="14" y="46" class="secondary hint" text-anchor="start">v0.2.0 · False-positive rate</text>
+</g></g>
+<line class="grid" x1="32" x2="928" y1="505" y2="505"/>
+<text x="32" y="531" class="secondary" text-anchor="start">FPR tradeoff: benign flags rise from 7 to 10. Lower FPR is better.</text>
+<text x="32" y="554" class="secondary" text-anchor="start">Includes fitting rows: descriptive, not an independent generalization estimate.</text>
+<text x="32" y="577" class="secondary" text-anchor="start">The holdout was inspected during development; it is not a blind external test.</text>
+</svg>
