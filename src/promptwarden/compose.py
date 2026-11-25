@@ -19,6 +19,7 @@ after the repair, the same way the reversal views mask.
 from __future__ import annotations
 
 import re
+import unicodedata
 from unicodedata import category
 
 from promptwarden.context import instruction_view
@@ -27,7 +28,7 @@ from promptwarden.normalize import (
     _LOOKALIKES,
     _SEPARATORS,
     _SHORT_WORDS,
-    _ZERO_WIDTH,
+    delete_ignorables,
     fold_unicode,
 )
 from promptwarden.reversal import (
@@ -436,7 +437,15 @@ def encoding_surface(text: str) -> str:
 
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    repaired = _strip_ascii_marks(text.translate(_ZERO_WIDTH).translate(_LOOKALIKES))
+    repaired = delete_ignorables(text)
+    # Decompose before NFKC so a combining acute on a base64 letter is removed
+    # rather than composed into a non-alphabet character. Fullwidth alphabet
+    # characters still fold on the following NFKC pass.
+    if any(ord(char) > 127 for char in repaired):
+        repaired = unicodedata.normalize("NFD", repaired)
+    repaired = _strip_ascii_marks(repaired.translate(_LOOKALIKES))
+    if any(ord(char) > 127 for char in repaired):
+        repaired = _strip_ascii_marks(unicodedata.normalize("NFKC", repaired))
 
     def rejoin(match: re.Match[str]) -> str:
         return match[0][::2]

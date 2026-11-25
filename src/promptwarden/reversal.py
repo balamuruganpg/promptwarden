@@ -31,7 +31,14 @@ from dataclasses import dataclass
 from unicodedata import category
 
 from promptwarden.context import _QUOTED, instruction_view
-from promptwarden.normalize import _LEET, _SHORT_WORDS, _ZERO_WIDTH, fold_unicode, normalize
+from promptwarden.normalize import (
+    _LEET,
+    _SHORT_WORDS,
+    _canonicalize,
+    delete_ignorables,
+    fold_unicode,
+    normalize,
+)
 
 _LOOSE_LEET = re.compile(r"\b[a-z013457]{3,32}\b")
 _TOKEN = re.compile(r"[a-z0-9]+")
@@ -364,15 +371,16 @@ def masked_surface(text: str) -> str:
     """Preserve carrier bytes while copying reported-quote masks from normalized prose."""
 
     raw = instruction_view(text)
-    # Apply the same context checks to byte-preserving text with invisible
-    # separators removed. A hidden character in "not" should not expose an
-    # otherwise negated carrier. Keep original word boundaries on active text.
-    if not text.isascii():
-        visible = text.translate(_ZERO_WIDTH)
-        if visible != text:
-            masked = instruction_view(visible)
-            if masked != visible:
-                text, raw = visible, masked
+    # Apply the same context checks to byte-preserving text with format and
+    # non-whitespace controls removed. A hidden character in "not" should not
+    # expose an otherwise negated carrier. Keep original word boundaries on
+    # active text. Deletion does not insert spaces: this surface also feeds
+    # case-sensitive carriers.
+    visible = delete_ignorables(text)
+    if visible != text:
+        masked = instruction_view(visible)
+        if masked != visible:
+            text, raw = visible, masked
     if not _QUOTED.search(text):
         return raw
     prepared = normalize(text)
@@ -400,6 +408,9 @@ def masked_surface(text: str) -> str:
 def instruction_bases(text: str, *, mask_first: bool) -> tuple[str, ...]:
     """Build original-orientation bases shared by reversal and composed repairs."""
 
+    # Format, controls, and compatibility forms are folded before reversal or
+    # composition so every view is built from the same character sequence.
+    text = _canonicalize(text)
     bases: tuple[str, ...]
     if mask_first:
         raw = masked_surface(text)

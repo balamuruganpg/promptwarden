@@ -54,9 +54,13 @@ flowchart TD
 
 ### Normalization and the original text
 
-`promptwarden.normalize.normalize` removes U+200B (zero-width space), U+200C (zero-width non-joiner), U+200D (zero-width joiner), and U+FEFF (including mid-text). It then translates only the finite Cyrillic/Greek lookalike map below and applies Unicode `str.casefold()`. Translation precedes casefolding so Greek `Υ` becomes `y` while `υ` becomes `u`. A final pass through the same map folds characters introduced by casefolding (for example `ϐ` casefolds to `β`, then maps to `b`), making the operation idempotent. It does not transliterate whole languages, apply NFKC, remove accents, rewrite digits, decode URL escapes, collapse spaced letters, or repair leetspeak.
+`promptwarden.normalize.normalize` is the instruction view shared by rules, n-grams, reversal, and composed repairs. It first keeps a lookalike whose NFKC image would leave the map below (lunate sigma becomes `C`/`c`). A mapped base followed by a combining mark is left for composition, so `Υ` plus diaeresis and acute still becomes `ΰ`. It then applies NFKC, so fullwidth letters, compatibility ligatures, and the ideographic space become their canonical equivalents. It removes every format character (category Cf), including U+200B, U+200C, U+200D, U+FEFF, U+2060, U+00AD, and the bidi controls U+202A–U+202E and U+2066–U+2069, and removes control characters (category Cc) other than tab, LF, and CR. U+200D is removed everywhere, including inside an emoji ZWJ sequence. Keeping a joiner only between emoji would need a second parser, and instruction features do not read emoji sequences. Visual family emoji therefore become separate emoji. A removed character that separates two instruction words, or two letter runs of length at least two that are not themselves one instruction word, is replaced by one space. A mark inside one named word, including a reversed instruction word of four or more ASCII letters, is deleted. Combining marks stay on their base. Tab, LF, and CR stay.
 
-The table gives the complete explicit source map and its final Latin output after casefolding. Characters absent from the table undergo ordinary casefolding, the four deletions, and mapping of any resulting listed characters.
+The same character sequence is what every later view sees. Encoded carriers use a deletion-only pass, then NFKC, and do not insert those spaces, so a hidden character cannot break an alphabet token. PII detectors keep using the original text.
+
+It then translates only the finite Cyrillic/Greek lookalike map below and applies Unicode `str.casefold()`. Translation precedes casefolding so Greek `Υ` becomes `y` while `υ` becomes `u`. A final pass through the same map folds characters introduced by casefolding (for example `ϐ` casefolds to `β`, then maps to `b`). Latin combining marks are stripped after that. Spaced letters, short hyphen and punctuation splits, and leetspeak are repaired on the folded text. The operation is idempotent. It does not transliterate whole languages, strip non-Latin accents, rewrite digits, or decode URL escapes.
+
+The table gives the complete explicit source map and its final Latin output after casefolding. Characters absent from the table undergo NFKC, format and control removal, ordinary casefolding, and mapping of any resulting listed characters.
 
 | Latin output | Cyrillic sources | Greek sources |
 |---|---|---|
@@ -219,7 +223,7 @@ v0.3.0 rules catch four paraphrases missed by v0.2.0. They cover pretending prio
 
 Every rule signal name appears at least once. No benign row fires a rule. Secrets in the file are shapes and documentation samples (`jane.doe@example.com`, `AKIAIOSFODNN7EXAMPLE`, a Verhoeff-valid synthetic Aadhaar `2345 6789 0124`, the header `BEGIN RSA PRIVATE KEY` with the body `not-a-real-key`).
 
-v0.7.0 ships the model fitted by v0.4.0 on the 90 seed-13 benchmark training rows (40 injection, 20 PII and 30 benign). The 48 default examples and the 91 benchmark holdout rows were excluded from that fit. v0.5.0 through v0.7.0 reused its parameters. The training script in a v0.4.0 checkout reproduces the fit with the original rule features.
+v0.7.0 ships the model fitted by v0.4.0 on the 90 seed-13 benchmark training rows (40 injection, 20 PII and 30 benign). The 48 default examples and the 91 benchmark holdout rows were excluded from that fit. v0.5.0 through v0.7.1 reused its parameters. v0.7.1 does not refit the model. The training script in a v0.4.0 checkout reproduces the fit with the original rule features.
 
 `evaluate.stratified_half` fixes the split of `evals/corpus.jsonl` (181 rows):
 
@@ -277,7 +281,7 @@ v0.3.0 covers the English and twelve additional-language constructions above, th
 Known limits, measured or structural:
 
 - Reported prose may resemble an instruction closely enough to flag. A real instruction may resemble inert reporting closely enough to be masked. Control syntax and encoded instruction examples can flag in documentation.
-- Other language constructions and unmapped homoglyphs can pass. Removing U+200C/U+200D and folding lookalikes is lossy for genuine native-language text. Fullwidth substitutions can evade the rules. v0.6.0 repairs single-letter spacing, short punctuation splits, leetspeak, and reversal on decisive instruction views, including a second transform stacked on the first. Synonym substitution is not inverted. Word-order views in v0.7.0 also check system fences.
+- Other language constructions and unmapped homoglyphs can pass. Stripping format characters, including U+200D inside emoji, and folding lookalikes is lossy for the normalized view of genuine native-language text and of ZWJ emoji. v0.7.1 folds fullwidth and other compatibility forms and strips format and non-whitespace controls before instruction views are built. A one-character word jammed directly onto a word that is not in the boundary list can still fuse. v0.6.0 repairs single-letter spacing, short punctuation splits, leetspeak, and reversal on decisive instruction views, including a second transform stacked on the first. Synonym substitution is not inverted. Word-order views in v0.7.0 also check system fences.
 - Aadhaar and card checks reject format-only matches. A different 12-digit or 13–19 digit string that happens to satisfy the checksum still fires. Random digit strings pass Verhoeff or Luhn about one time in ten.
 - API-key signals are shapes. `AKIAIOSFODNN7EXAMPLE` is the AWS documentation sample and it fires, because the shape matches.
 - A fifth encoding layer or a decisive phrase beyond the per-token or shared work limits can pass. Leet and case-mixing can destroy base64 bits. Inserted hyphens can be indistinguishable from URL-safe alphabet data.

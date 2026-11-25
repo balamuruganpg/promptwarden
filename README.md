@@ -1,7 +1,7 @@
 <h1 align="center">🛡️ PromptWarden</h1>
 <p align="center">First-stage scan for <strong>prompt injection</strong> and <strong>sensitive-data leakage</strong> — rules + a learned classifier, stdlib only.</p>
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.7.0-blue" alt="Version 0.7.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.7.1-blue" alt="Version 0.7.1"></a>
   <a href="https://github.com/balamuruganpg/promptwarden/actions/workflows/ci.yml"><img src="https://github.com/balamuruganpg/promptwarden/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/tests-382%20passed-brightgreen" alt="382 tests passed">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
@@ -70,7 +70,7 @@ ScanResult(score=0.03761973859584621, flagged=False, categories=(), signals=())
 | ✓ What it catches | ⚠ What it misses / costs |
 |---|---|
 | Instruction override, role hijack, system-prompt extraction, fake system turns, fences, chat-template tokens, urgency/secrecy | Novel phrasings / paraphrases; lexical rules and hashed n-grams are not a semantic guarantee. |
-| Finite Cyrillic/Greek homoglyph folds, zero-width stripping, bounded patterns for twelve additional languages, and composed spacing, leetspeak, and reversal on decisive instruction views | Arbitrary translations, unsupported lookalikes, and synonym substitution. |
+| NFKC folding, format and non-whitespace control stripping, finite Cyrillic/Greek homoglyph folds, bounded patterns for twelve additional languages, and composed spacing, leetspeak, and reversal on decisive instruction views | Arbitrary translations, unsupported lookalikes, and synonym substitution. A one-character word jammed onto an unknown word can still fuse. |
 | Luhn-valid cards, Verhoeff-valid Aadhaar; email, phone (including Indian mobiles), PAN, API-key shapes and private-key headers | Low-signal PII without supported shapes or checksums; addresses, passwords, SSNs and obfuscated identifiers. |
 | Up to four layers of standard or URL-safe base64, hex and percent escapes, in any order. Reordered system fences can supply a decisive hit. | Payloads beyond the decode budget, ambiguous hyphen splits, and leet or case changes to base64 data. |
 | Bounded context for explicitly reported quotes and local negation | Reporting language can still mislead a lexical scanner. Control syntax, encoded instructions and PII shapes can flag in documentation. |
@@ -81,7 +81,7 @@ ScanResult(score=0.03761973859584621, flagged=False, categories=(), signals=())
 
 ```mermaid
 flowchart TD
-  T[Input text] --> N["Normalization<br/>homoglyph fold · zero-width strip · casefold"]
+  T[Input text] --> N["Normalization<br/>NFKC · format strip · homoglyph fold · casefold"]
   T --> I["Original PII and case-preserving,<br/>context-masked carrier scan"]
   N --> C[Bounded context masking]
   N --> R["Instruction rules<br/>control syntax sees unmasked text"]
@@ -122,7 +122,7 @@ Categories name fired rule families **only when flagged**. Classifier-only flags
 <details>
 <summary>Normalization details — finite folding, not transliteration or redaction</summary>
 
-- Instruction rules and model n-grams share normalization. Both strip U+200B/C/D and U+FEFF, fold the finite Cyrillic/Greek map, casefold, then fold again for idempotence.
+- Instruction rules and model n-grams share normalization. The shared view applies NFKC, strips format characters (category Cf, including U+200D) and controls other than tab, LF, and CR, folds the finite Cyrillic/Greek map, casefolds, then folds again for idempotence. A removed character between two words becomes a space. U+200D is removed inside emoji sequences as well.
 - PII and encoded candidates retain original identifiers, bytes, digits and separators. The decoder preserves case and applies context masking to the carrier and each recovered instruction.
 - Quotation marks alone never make a payload safe. Context masking is confined to supported reporting and negation constructions. [Complete map and context limits](SPEC.md#normalization-and-the-original-text)
 
@@ -143,6 +143,7 @@ Categories name fired rule families **only when flagged**. Classifier-only flags
 | v0.5.0 | 0.9626 | 0.8512 | 0.9035 | 0.0667 | 0.9630 | 0.6250 | 103 / 4 / 56 / 18 |
 | v0.6.0 | 0.9626 | 0.8512 | 0.9035 | 0.0667 | 0.9630 | 0.6250 | 103 / 4 / 56 / 18 |
 | v0.7.0 | 0.9626 | 0.8512 | 0.9035 | 0.0667 | 0.9630 | 0.6250 | 103 / 4 / 56 / 18 |
+| v0.7.1 | 0.9626 | 0.8512 | 0.9035 | 0.0667 | 0.9630 | 0.6250 | 103 / 4 / 56 / 18 |
 
 **Held-out corpus (91 rows, good-not-pristine).** These rows were excluded from fitting and inspected during development.
 
@@ -155,6 +156,7 @@ Categories name fired rule families **only when flagged**. Classifier-only flags
 | v0.5.0 | 0.9630 | 0.8525 | 0.9043 | 0.0667 | 0.9756 | 0.6000 | 52 / 2 / 28 / 9 |
 | v0.6.0 | 0.9630 | 0.8525 | 0.9043 | 0.0667 | 0.9756 | 0.6000 | 52 / 2 / 28 / 9 |
 | v0.7.0 | 0.9630 | 0.8525 | 0.9043 | 0.0667 | 0.9756 | 0.6000 | 52 / 2 / 28 / 9 |
+| v0.7.1 | 0.9630 | 0.8525 | 0.9043 | 0.0667 | 0.9756 | 0.6000 | 52 / 2 / 28 / 9 |
 
 v0.3.0 catches 74 of 81 injection rows, including all 50 v0.2.0 hits. All three remaining benign flags come from PII shapes in documentation or test text. Rules alone and the retrained bundle flag the same benchmark rows at 0.5.
 
@@ -165,6 +167,8 @@ v0.5.0 catches 78 of 81 and closes most of the reversal gap: it also evaluates c
 v0.6.0 keeps that corpus operating point (full F1 0.9035, FPR 0.0667; held-out F1 0.9043, FPR 0.0667). The bundled model was not refit. Composed views repair stacks the single normalize-then-reverse pass missed: de-spaced readings of reversed text, reversed readings of de-leeted text, and a second standard-base64 decode, still decisive-only and still masked. On a fixed depth-2 set of 9,056 applicable variants, bypass falls 30.80% → 11.36%. Reversal∘spacing falls 63.73% → 20.59%, leet∘spacing 88.46% → 30.77%, and nested base64 100% → 7.69%. On the same 2,960-variant replay, char_reverse falls 34.93% → 16.62% and word_reverse 33.24% → 19.58%.
 
 v0.7.0 retains the same bundled classifier and corpus scores. The fixed replay now flags all 78 padded URL-safe wrappers, all 78 unpadded wrappers, all 78 triple standard-base64 wrappers, and both sets of 78 double-escaped inputs (percent and hex). The original word-reordered system fence also flags. The evaluation includes both URL-specific alphabet symbols on every URL-safe layer. Hyphen splitting of those carriers remains ambiguous. [Per-family counts and limits](CHANGELOG.md#070--2026-11-25)
+
+v0.7.1 keeps that classifier and those corpus scores (full F1 0.9035, FPR 0.0667; held-out F1 0.9043, FPR 0.0667). Normalization applies NFKC and strips format characters and non-whitespace controls before every instruction view. On the fixed probe of flagged injection rows, decisive bypass for bidi controls, word joiner, soft hyphen, NUL, other C0/C1 controls, mid-text FEFF, and fullwidth or other compatibility forms falls to zero. U+200D is stripped everywhere, including emoji ZWJ sequences. The benign emoji, accented Latin, CJK, Arabic, and Hebrew controls stay unflagged. [Per-family counts](CHANGELOG.md#071--2026-11-25)
 
 <details>
 <summary>Historical v0.1.0 → v0.2.0 benchmark and FPR tradeoff (holdout good-not-pristine)</summary>
@@ -215,7 +219,7 @@ The v0.2.0 bundle subtracted `log(0.85 / 0.15)` from its fitted intercept. This 
 <details>
 <summary><strong>Training data &amp; seed-13 split (holdout good-not-pristine)</strong></summary>
 
-The v0.1.0 model fit the 48 default rows. v0.3.0 refits those 48 plus the same **90 benchmark fitting rows** used in v0.2.0 (40 injection, 20 PII and 30 benign). v0.4.0 fit the 90 benchmark training rows alone. v0.5.0 through v0.7.0 reuse that model. The **91 good-not-pristine holdout rows** (41 injection, 20 PII and 30 benign) stay out of fitting. The split shuffles indices within each category, in sorted category order, using one `random.Random(13)`, assigns the first `len(category) // 2` to training, then restores corpus order. The partitions are disjoint after normalization.
+The v0.1.0 model fit the 48 default rows. v0.3.0 refits those 48 plus the same **90 benchmark fitting rows** used in v0.2.0 (40 injection, 20 PII and 30 benign). v0.4.0 fit the 90 benchmark training rows alone. v0.5.0 through v0.7.1 reuse that model. The **91 good-not-pristine holdout rows** (41 injection, 20 PII and 30 benign) stay out of fitting. The split shuffles indices within each category, in sorted category order, using one `random.Random(13)`, assigns the first `len(category) // 2` to training, then restores corpus order. The partitions are disjoint after normalization.
 
 The corpus includes Cyrillic and Greek homoglyphs, zero-width characters, non-English instructions, and indirect injections in emails, tickets and contracts. v0.3.0 adds targeted patterns for the French, Spanish, German, Japanese, Russian and Hindi examples. Synthetic near-neighbor examples live in the regression suite.
 
