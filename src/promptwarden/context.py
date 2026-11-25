@@ -2,7 +2,7 @@
 
 Only explicitly reported quotations and locally negated action clauses are
 masked. Quotation marks alone never make a payload safe. Offsets/newlines are
-preserved. PII, encoded payloads and control syntax are checked independently.
+preserved. Direct PII and literal control syntax are checked independently.
 This view cannot establish that prose claiming to report an attack is trusted.
 """
 

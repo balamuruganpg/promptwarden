@@ -13,17 +13,16 @@ signal for either.
 from __future__ import annotations
 
 import base64
-import binascii
 import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from urllib.parse import unquote_to_bytes
 
-from promptwarden.compose import composed_instruction_views, encoding_surface
+from promptwarden.compose import composed_instruction_views
 from promptwarden.context import instruction_view
+from promptwarden.decoding import TOKEN_CHARS, decoded_views
 from promptwarden.normalize import fold_unicode, normalize
-from promptwarden.reversal import InstructionView, char_reverse, instruction_views, word_reverse
+from promptwarden.reversal import instruction_views
 
 # Verhoeff multiplication (D), permutation (P), and inverse tables.
 # These are the standard dihedral-group tables: a digit string is valid when
@@ -96,15 +95,6 @@ FAMILIES: dict[str, str] = {
     **{name: "injection" for name in INJECTION_SIGNALS},
     **{name: "pii" for name in PII_SIGNALS},
 }
-
-# Encoded blobs are scanned only up to this many characters. A single longer
-# token is truncated before decoding, so a marker past the cap can be missed.
-_ENCODED_CAP = 4096
-# Two base64 decodes cover a wrapper around a wrapper. A third layer is out of
-# scope. Percent-encoding and hex stay single-pass: a second unescape would
-# treat ``%2520`` as an instruction. The counter also stops a blob that
-# decodes to itself.
-_MAX_ENCODED_DEPTH = 2
 
 _OVERRIDE = re.compile(
     r"\b(?:ignore|disregard|forget|override|cancel|discard|abort|drop|disable|"
@@ -207,7 +197,8 @@ _EXTRACT_ABOVE = re.compile(
     re.IGNORECASE,
 )
 _FAKE_SYSTEM = re.compile(r"(?m)^\s*system\s*:|<\s*/?\s*system\s*>", re.IGNORECASE)
-_FENCE = re.compile(r"```+\s*system\b", re.IGNORECASE)
+_LONG_WORD = re.compile(r"[A-Za-z0-9]+={0,2}")
+_FENCE = re.compile(r"(?<!`)`{3,}\s*system\b", re.IGNORECASE)
 _CHAT_TOKENS: tuple[str, ...] = (
     "<|im_start|>",
     "<|im_end|>",
@@ -264,10 +255,6 @@ _JWT = re.compile(
     r"(?![A-Za-z0-9_-])"
 )
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:(?:RSA|OPENSSH|EC|DSA|PGP) )?PRIVATE KEY(?: BLOCK)?-----")
-_B64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{32,}={0,2}(?![A-Za-z0-9+/=])")
-_HEX = re.compile(r"(?<![0-9A-Za-z])[0-9A-Fa-f]{32,}(?![0-9A-Za-z])")
-_URL_TOKEN = re.compile(r"[A-Za-z0-9._~+%/-]+")
-_PERCENT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
 
 
 @dataclass(frozen=True)
@@ -473,108 +460,30 @@ def _private_key(text: str) -> bool:
     return _PRIVATE_KEY.search(text) is not None
 
 
-def _encoded_payload(text: str, depth: int = 0) -> bool:
-    if depth >= _MAX_ENCODED_DEPTH:
-        return False
-    if _encoded_in(text, depth):
-        return True
-    # Splits, marks, and lookalikes are undone without casefolding. The repair
-    # is checked only when it changes the text, so a clean blob is decoded once.
-    repaired = encoding_surface(text)
-    return repaired != text and _encoded_in(repaired, depth)
-
-
-def _encoded_in(text: str, depth: int, *, base64_only: bool = False) -> bool:
-    for match in _B64.finditer(text):
-        token = match.group(0)[:_ENCODED_CAP]
-        if len(token) % 4 != 0:
-            continue
-        try:
-            raw = base64.b64decode(token, validate=True)
-        except (ValueError, binascii.Error):
-            continue
-        if _instruction_text(raw, depth):
+def _encoded_payload(text: str) -> bool:
+    for decoded in decoded_views(text):
+        contextual = instruction_view(normalize(decoded))
+        if any(_CHECKS[name](contextual) for name in _DECISIVE_INSTRUCTIONS):
             return True
-    if base64_only:
-        return False
-    for match in _HEX.finditer(text):
-        token = match.group(0)[:_ENCODED_CAP]
-        if len(token) % 2 != 0:
-            token = token[:-1]
-        try:
-            raw = bytes.fromhex(token)
-        except ValueError:
-            continue
-        if _instruction_text(raw, depth):
+        if _extra_instruction_names(decoded):
             return True
-    if "%" in text:
-        for match in _URL_TOKEN.finditer(text):
-            token = match[0][:_ENCODED_CAP]
-            if _PERCENT_ESCAPE.search(token) and _instruction_text(unquote_to_bytes(token), depth):
-                return True
     return False
 
 
-def _instruction_text(raw: bytes, depth: int = 0) -> bool:
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    if sum(char.isalpha() for char in text) < 8:
-        return False
-    normalized = normalize(text)
-    if any(_CHECKS[name](normalized) for name in _DECISIVE_INSTRUCTIONS):
-        return True
-    # Decoded text skips the original-orientation mask, matching the direct
-    # encoded path. Reversal and composed repairs still run the instruction
-    # rules, not PII. One further base64 decode catches a wrapper around a
-    # wrapper. Percent and hex are not decoded again.
-    if _names_on_views(instruction_views(text, mask_first=False)):
-        return True
-    if _names_on_views(composed_instruction_views(text, mask_first=False)):
-        return True
-    return depth + 1 < _MAX_ENCODED_DEPTH and _nested_base64(text, depth + 1)
-
-
-def _nested_base64(text: str, depth: int) -> bool:
-    if _encoded_in(text, depth, base64_only=True):
-        return True
-    repaired = encoding_surface(text)
-    return repaired != text and _encoded_in(repaired, depth, base64_only=True)
-
-
-def _names_on_views(views: tuple[InstructionView, ...]) -> set[str]:
-    """Decisive instruction names on reversed views.
-
-    ``system_fence`` is limited to character-order views. Word-order reversal
-    can move an unrelated ``system`` token into a `` ```python `` fence.
-    """
-
-    found: set[str] = set()
-    for view in views:
-        for name in _DECISIVE_INSTRUCTIONS:
-            if name == "system_fence" and not view.characters_only:
-                continue
-            if name not in found and _CHECKS[name](view.text):
-                found.add(name)
-    return found
-
-
 def _extra_instruction_names(text: str) -> set[str]:
-    """Decisive signals from reversal and from composed repairs.
+    """Run only decisive instruction checks on the masked, transformed views."""
 
-    Encoded carriers are reversed as raw text so base64 keeps its case. The
-    decoded check consults these views itself, which catches a reversed or
-    repaired payload inside an untouched carrier. Composed views add a signal
-    only when de-spacing or loose de-leet changes the folded text.
-    """
-
-    names = _names_on_views(instruction_views(text, mask_first=True))
-    names.update(_names_on_views(composed_instruction_views(text, mask_first=True)))
-    for variant in (char_reverse(text), word_reverse(text)):
-        if variant != text and _encoded_payload(variant):
-            names.add("encoded_payload")
-    return names
+    # A single ASCII word longer than the token cap cannot be segmented by
+    # either lexical repair. Its encoded reading is handled separately.
+    if len(text) > TOKEN_CHARS and _LONG_WORD.fullmatch(text):
+        return set()
+    found: set[str] = set()
+    for readings in (instruction_views, composed_instruction_views):
+        for view in readings(text, mask_first=True):
+            for name in _DECISIVE_INSTRUCTIONS:
+                if name not in found and _CHECKS[name](view.text):
+                    found.add(name)
+    return found
 
 
 _CONTROL_SIGNALS = ("fake_system_turn", "system_fence", "chat_template_token")

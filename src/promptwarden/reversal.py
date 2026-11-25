@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from unicodedata import category
 
 from promptwarden.context import _QUOTED, instruction_view
-from promptwarden.normalize import _LEET, _SHORT_WORDS, fold_unicode, normalize
+from promptwarden.normalize import _LEET, _SHORT_WORDS, _ZERO_WIDTH, fold_unicode, normalize
 
 _LOOSE_LEET = re.compile(r"\b[a-z013457]{3,32}\b")
 _TOKEN = re.compile(r"[a-z0-9]+")
@@ -315,14 +315,18 @@ def _segment(text: str) -> str:
     return segment_fused(text)
 
 
+# A literal language fence already identifies its opening delimiter. Preserve
+# that evidence before reordering, which can move e.g. print('system') there.
+_LANGUAGE_OPENER = re.compile(
+    r"(?<!`)`{3,}(?=[ \t]*(?:python|py|javascript|js|typescript|ts|json|yaml|"
+    r"toml|bash|sh|shell|sql|html|css|xml|java|c(?:pp|sharp)?|go|rust|ruby)[ \t]*(?:\r?\n|\Z))",
+    re.IGNORECASE,
+)
+
+
 @dataclass(frozen=True)
 class InstructionView:
-    """One reversed candidate.
-
-    ``characters_only`` is true when word order was not changed. A system fence
-    is checked only on those views: word-order reversal can slide an unrelated
-    ``system`` token into a `` ```python `` fence.
-    """
+    """A transformed reading and whether it preserves the source word order."""
 
     text: str
     characters_only: bool
@@ -356,56 +360,61 @@ def _views_from(base: str) -> list[InstructionView]:
     return views
 
 
-def _align_quote_masks(text: str) -> str:
-    """Mask raw quotes that the folded instruction view already blanks.
+def masked_surface(text: str) -> str:
+    """Preserve carrier bytes while copying reported-quote masks from normalized prose."""
 
-    A zero-width character in a reporting frame hides that frame from the raw
-    matcher. Folding makes the frame visible. Copy those quote masks back so
-    reversal cannot restore the quoted text. Quotes the folded view leaves
-    visible stay visible here too.
-    """
-
-    folded = fold_unicode(text)
-    folded_view = instruction_view(folded)
-    chars = list(instruction_view(text))
-    if folded == folded_view or not _QUOTED.search(text):
-        return "".join(chars)
+    raw = instruction_view(text)
+    # Apply the same context checks to byte-preserving text with invisible
+    # separators removed. A hidden character in "not" should not expose an
+    # otherwise negated carrier. Keep original word boundaries on active text.
+    if not text.isascii():
+        visible = text.translate(_ZERO_WIDTH)
+        if visible != text:
+            masked = instruction_view(visible)
+            if masked != visible:
+                text, raw = visible, masked
+    if not _QUOTED.search(text):
+        return raw
+    prepared = normalize(text)
+    contextual = instruction_view(prepared)
+    if prepared == contextual and raw == text:
+        return text
+    chars = list(raw)
+    # Quote delimiters separate tokens. Normalizing successive intervals
+    # maps their offsets even when folding or joining changes their lengths.
+    source_end = prepared_end = 0
     for match in _QUOTED.finditer(text):
         start, end = match.span()
-        fold_start = len(fold_unicode(text[:start]))
-        fold_end = len(fold_unicode(text[:end]))
-        if fold_end <= fold_start or fold_end > len(folded_view):
-            continue
-        original = folded[fold_start:fold_end]
-        masked = folded_view[fold_start:fold_end]
-        if original.strip() and not masked.strip():
-            for index in range(start, end):
-                if chars[index] not in "\r\n":
-                    chars[index] = " "
+        prepared_start = prepared_end + len(normalize(text[source_end:start]))
+        prepared_end = prepared_start + len(normalize(match[0]))
+        if not contextual[prepared_start:prepared_end].strip():
+            chars[start:end] = " " * (end - start)
+        elif not raw[start:end].strip():
+            # A normalized activation cue can also make a reported quote
+            # operative. Restore its case-sensitive bytes and local negations.
+            chars[start:end] = instruction_view(match[0])
+        source_end = end
     return "".join(chars)
 
 
-def instruction_views(text: str, *, mask_first: bool) -> tuple[InstructionView, ...]:
-    """Return reversed instruction views of ``text``.
-
-    ``mask_first`` copies the original-orientation masks before reversal.
-    Decoded payloads pass ``False``: encoded candidates already bypass the
-    mask on the direct path, and the final ``instruction_view`` still blanks
-    a negation that reversal restored.
-    """
+def instruction_bases(text: str, *, mask_first: bool) -> tuple[str, ...]:
+    """Build original-orientation bases shared by reversal and composed repairs."""
 
     bases: tuple[str, ...]
     if mask_first:
-        bases = (
-            _align_quote_masks(text),
-            instruction_view(normalize(text)),
-            instruction_view(fold_unicode(text)),
-        )
+        raw = masked_surface(text)
+        bases = (raw, instruction_view(normalize(raw)), instruction_view(fold_unicode(raw)))
     else:
         bases = (text,)
+    return tuple(dict.fromkeys(_LANGUAGE_OPENER.sub("~~~", base) for base in bases))
+
+
+def instruction_views(text: str, *, mask_first: bool) -> tuple[InstructionView, ...]:
+    """Reverse before and after normalization, masking each restored reading."""
+
     seen: set[str] = set()
     views: list[InstructionView] = []
-    for base in bases:
+    for base in instruction_bases(text, mask_first=mask_first):
         for view in _views_from(base):
             if view.text not in seen:
                 seen.add(view.text)

@@ -29,13 +29,12 @@ from promptwarden.normalize import (
     _SHORT_WORDS,
     _ZERO_WIDTH,
     fold_unicode,
-    normalize,
 )
 from promptwarden.reversal import (
     _VOCAB,
     InstructionView,
-    _align_quote_masks,
     char_reverse,
+    instruction_bases,
     word_reverse,
 )
 
@@ -138,9 +137,10 @@ _OTHER_DIGITS = frozenset("2689")
 # A base64 blob whose alphabet characters were split by a space or a hyphen.
 # Case is preserved: base64 is case-sensitive, so this repair must not casefold.
 _ENCODED_SPLIT = re.compile(
-    r"(?<![A-Za-z0-9+/])(?:[A-Za-z0-9+/][ \t-]){31,}[A-Za-z0-9+/](?![A-Za-z0-9+/])"
+    r"(?<![A-Za-z0-9_+/])[A-Za-z0-9_+/-](?P<sep>[ \t-])"
+    r"(?:[A-Za-z0-9_+/-](?P=sep)){2,}[A-Za-z0-9_+/-](?![A-Za-z0-9_+/])"
 )
-_ENCODED_PADDING = re.compile(r"([A-Za-z0-9+/]{32,})(?:[ \t]*=)+")
+_ENCODED_PADDING = re.compile(r"(?<![A-Za-z0-9+/_-])([A-Za-z0-9+/_-]{32,})(?:[ \t]*=)+")
 
 
 def _strip_ascii_marks(text: str) -> str:
@@ -389,12 +389,7 @@ def _loose_deleet(text: str) -> str:
 
 
 def _readings(text: str) -> list[tuple[str, bool]]:
-    """Repair one base into decisive readings.
-
-    Each pair is ``(text, characters_only)``. Word-order readings are not
-    ``characters_only``: a system fence is not checked on them, because moving
-    words can slide an unrelated ``system`` into a code fence.
-    """
+    """Repair one base into decisive readings, retaining orientation metadata."""
 
     folded = _fold_view(text)
     joined = _join_splits(folded)
@@ -417,26 +412,9 @@ def _readings(text: str) -> list[tuple[str, bool]]:
 
 
 def composed_instruction_views(text: str, *, mask_first: bool) -> tuple[InstructionView, ...]:
-    """Return repaired instruction views of ``text``.
+    """Repair the same bases as the reversal pass and mask each restored reading."""
 
-    ``mask_first`` uses the same original-orientation masks as the reversal
-    views. Decoded payloads pass ``False``; the final :func:`instruction_view`
-    still blanks a negation or a reported quote that the repair restored.
-    Empty when neither joining nor loose de-leet changes the folded text.
-    Pure reversal is left to the reversal views.
-    """
-
-    if not isinstance(text, str):
-        raise TypeError("text must be a string")
-    bases: tuple[str, ...]
-    if mask_first:
-        bases = (
-            _align_quote_masks(text),
-            instruction_view(normalize(text)),
-            instruction_view(fold_unicode(text)),
-        )
-    else:
-        bases = (text,)
+    bases = instruction_bases(text, mask_first=mask_first)
     seen: set[str] = set()
     views: list[InstructionView] = []
     for base in bases:
@@ -461,7 +439,7 @@ def encoding_surface(text: str) -> str:
     repaired = _strip_ascii_marks(text.translate(_ZERO_WIDTH).translate(_LOOKALIKES))
 
     def rejoin(match: re.Match[str]) -> str:
-        return re.sub(r"[ \t-]", "", match.group(0))
+        return match[0][::2]
 
     repaired = _ENCODED_SPLIT.sub(rejoin, repaired)
 

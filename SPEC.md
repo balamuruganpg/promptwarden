@@ -36,7 +36,7 @@ flowchart TD
   U --> C[Bounded context masking]
   U --> R[Control syntax rules]
   C --> A[Prose instruction rules]
-  T --> I[PII and encoded-blob rules]
+  T --> I[Original PII and context-masked encoded candidates]
   C --> N[Hashed n-grams]
   I --> S
   I --> V
@@ -92,7 +92,7 @@ Encoded candidates also use the original text. Base64 and JWT components are cas
 - An execution cue, conditional qualifier, or recognizable document-processing request in either adjacent 160-character window leaves the quote visible. A cue inside the quote that addresses the model also leaves it visible.
 - A locally negated supported action can be masked. The mask stops at clause boundaries and other action verbs. Nearby conditional or exception language leaves the instruction visible. Negating obedience to prior instructions can itself signal an override.
 
-Control syntax (system turns and fences, chat-template tokens), encoded candidates and all PII bypass masking. Context is inferred from the text itself and can be misleading. A payload can still pass if it resembles an inert report closely enough, or uses an activation cue outside the supported wording or window.
+Direct control syntax (system turns, fences and chat-template tokens) and original PII bypass masking. All transformed readings, including decoded controls, use the reporting and negation masks. Context is inferred from the text itself and can be misleading. A payload can still pass if it resembles an inert report closely enough, or uses an activation cue outside the supported wording or window.
 
 ## Rules
 
@@ -149,7 +149,23 @@ The backslashes before table pipes are Markdown escaping. The Korean constructio
 
 ### Encoded payloads
 
-Base64 candidates are runs of at least 32 standard alphabet characters with optional padding and a total length divisible by four after the 4096-character decoding cap. Hex candidates are runs of at least 32 hex digits and are decoded up to the same cap in pairs. A contiguous URL-style token qualifies when it contains at least one `%HH` byte escape within the cap. Literal plus signs are preserved. The bytes must decode as UTF-8 and contain at least eight letters. The normalized result must match a prose instruction or control syntax rule. Each candidate is decoded once and checked without context masking.
+The decoder recognizes standard and URL-safe base64 alphabets at every depth. A base64 candidate needs 32 alphabet characters. Missing padding is restored when possible. Hex candidates need at least 32 hex digits and decode in pairs. A URL-style token qualifies when it contains a `%HH` byte escape. Literal plus signs survive percent decoding.
+
+The scanner traverses distinct UTF-8 readings breadth first. Every child can contain any of the three encodings, including hex made entirely of digits. Traversal stops when it finds a decisive instruction, exhausts the queue, or reaches the following limits.
+
+| Bound per scan | Value | What it covers |
+|---|---:|---|
+| Decoding depth | 4 | Three transport wrappers around an already encoded instruction |
+| Candidate length | 4,096 ASCII characters | The prefix passed to a codec on any layer |
+| Total candidate bytes | 32,768 | All attempted codec inputs combined, including failures. Decoded output cannot exceed this total. |
+| Distinct attempts | 64 | All codecs, orientations and repairs share one allowance |
+| Extra root readings | First 16,384 characters | Case-preserving repairs and reversed carriers. Intact candidates can occur anywhere in the original. |
+
+An attempted (codec, token) pair consumes budget once. Each distinct decoded text is queued at its shallowest depth. An input that exceeds the remaining byte allowance is skipped. Full-document matching still reads the source text. The limits bound the decoding work added by nesting.
+
+Carrier bytes retain their case. The decoder checks both intact and repaired surfaces and can undo character or word reversal of opaque outer base64 and hex carriers. Well-formed percent tokens are parsed in source order to preserve their quoting and negation. A reversed carrier with broken escape syntax can still be restored before unescaping. Each recovered text is normalized and context-masked for decisive instruction checks, including character, word and composed repairs. Only the `encoded_payload` signal is emitted for a decoded hit. PII stays on the original text and lexical classifier features stay on the direct view.
+
+The `system_fence` pattern also runs on masked word-order readings. A recognized source language label on a code fence, such as a Python opening line, protects that delimiter during transformation. This keeps a literal such as `print('system')` from becoming the fence language. A rewrite whose opener already looks like a recognized code language is ambiguous.
 
 ## Features
 
@@ -203,13 +219,7 @@ v0.3.0 rules catch four paraphrases missed by v0.2.0. They cover pretending prio
 
 Every rule signal name appears at least once. No benign row fires a rule. Secrets in the file are shapes and documentation samples (`jane.doe@example.com`, `AKIAIOSFODNN7EXAMPLE`, a Verhoeff-valid synthetic Aadhaar `2345 6789 0124`, the header `BEGIN RSA PRIVATE KEY` with the body `not-a-real-key`).
 
-Rebuild the bundled model from the repository root:
-
-```bash
-python scripts/train_default_model.py
-```
-
-The command fits **all 48 default rows followed by 90 benchmark training rows**, in file order within each source (138 total, with 53 injection, 27 PII and 58 benign). v0.3.0 reuses the v0.2.0 split and refits on the updated rule and lexical features. Both corpus files are unchanged.
+v0.7.0 ships the model fitted by v0.4.0 on the 90 seed-13 benchmark training rows (40 injection, 20 PII and 30 benign). The 48 default examples and the 91 benchmark holdout rows were excluded from that fit. v0.5.0 through v0.7.0 reused its parameters. The training script in a v0.4.0 checkout reproduces the fit with the original rule features.
 
 `evaluate.stratified_half` fixes the split of `evals/corpus.jsonl` (181 rows):
 
@@ -222,12 +232,12 @@ The bundle uses learning rate 1.0, **1200 epochs, L2 0.001**, selected on traini
 
 For v0.2.0, training-only 5-fold cross-validation on the 138 training rows selected classifier cutoff **0.85** from 0.50–0.90 in steps of 0.05. The objective was highest pooled F1 subject to pooled FPR <= 0.10, with ties going to the smaller cutoff. The selected training-CV point had F1 0.7770 and FPR 0.0862. v0.3.0 retains this classifier cutoff and the public scan threshold of 0.5.
 
-After fitting all 138 rows, subtract `log(0.85 / (1 - 0.85)) = 1.7346010553881064` from the fitted intercept and save the model. Thus at the public threshold 0.5 the classifier requires an unshifted probability of at least 0.85. The runtime still computes `max(rule_score, model.predict_proba(features))`; no rule score changes and no new runtime calibration code are needed. At other public thresholds, the shifted probability remains monotonic but is a conservative score, not a calibrated frequency estimate.
+The training script subtracts `log(0.85 / (1 - 0.85)) = 1.7346010553881064` from the fitted intercept before saving the model. Thus at the public threshold 0.5 the classifier requires an unshifted probability of at least 0.85. The runtime still computes `max(rule_score, model.predict_proba(features))`; no rule score changes and no new runtime calibration code are needed. At other public thresholds, the shifted probability remains monotonic but is a conservative score, not a calibrated frequency estimate.
 
 The report records both corpus hashes, the model hash, and 1-based split indices. Run the headline harness from the repository root.
 
 ```bash
-python scripts/evaluate_default_model.py --out evals/results/benchmark-v0.3.0.json
+python scripts/evaluate_default_model.py
 ```
 
 Historical reports show the original v0.1.0 bundle, the unshifted and shipped v0.2.0 bundles, and the v0.2.0 training-only cutoff audit. [v0.1.0](evals/results/2026-11-17-before.json) · [v0.2.0 unshifted](evals/results/2026-11-17-initial.json) · [v0.2.0 shipped](evals/results/2026-11-17-after.json) · [v0.2.0 training CV](evals/results/2026-11-17-training-cv.json)
@@ -245,7 +255,7 @@ Reported metrics are precision, recall, F1, and false-positive rate, plus the co
 
 On `examples/default_corpus.jsonl`, 5-fold evaluation and rules alone both give counts of 20 TP, 0 FP, 28 TN and 0 FN at 0.5. The corpus contains 48 rows and served as development data.
 
-`scripts/evaluate_default_model.py` reports the shipped model on all 181 benchmark rows and the 91 rows excluded from fitting at threshold 0.5. It checks normalized-text disjointness from combined training. The full score is descriptive because it includes 90 fitting rows. The holdout is good-not-pristine because development inspected it, including during v0.2.0. The CLI's `eval` command trains models in its own split or folds.
+`scripts/evaluate_default_model.py` reports the shipped model on all 181 benchmark rows and the 91 rows excluded from fitting at threshold 0.5. It checks normalized-text disjointness from the benchmark training half. The full score is descriptive because it includes 90 fitting rows. The holdout is good-not-pristine because development inspected it, including during v0.2.0. The CLI's `eval` command trains models in its own split or folds.
 
 From v0.2.0 to v0.3.0, full-benchmark F1 rose from 0.7282 to 0.8879, injection recall from 0.6173 to 0.9136, and FPR fell from 0.1667 to 0.0500. On the good-not-pristine holdout, F1 rose from 0.7059 to 0.8829, injection recall from 0.5854 to 0.9024, and FPR fell from 0.1667 to 0.0333. PII recall was 0.6250 full and 0.6000 on the good-not-pristine holdout in both versions. Rules alone and the v0.3.0 bundle flag the same benchmark rows at 0.5. [Benchmark tables](README.md#audited-benchmark-181-adversarial-examples) · [v0.3.0 results](evals/results/benchmark-v0.3.0.json)
 
@@ -267,11 +277,11 @@ v0.3.0 covers the English and twelve additional-language constructions above, th
 Known limits, measured or structural:
 
 - Reported prose may resemble an instruction closely enough to flag. A real instruction may resemble inert reporting closely enough to be masked. Control syntax and encoded instruction examples can flag in documentation.
-- Other language constructions and unmapped homoglyphs can pass. Removing U+200C/U+200D and folding lookalikes is lossy for genuine native-language text. Fullwidth substitutions can evade the rules. v0.6.0 repairs single-letter spacing, short punctuation splits, leetspeak, and reversal on decisive instruction views, including a second transform stacked on the first. Synonym substitution is not inverted. A system fence is not checked on a word-order view.
+- Other language constructions and unmapped homoglyphs can pass. Removing U+200C/U+200D and folding lookalikes is lossy for genuine native-language text. Fullwidth substitutions can evade the rules. v0.6.0 repairs single-letter spacing, short punctuation splits, leetspeak, and reversal on decisive instruction views, including a second transform stacked on the first. Synonym substitution is not inverted. Word-order views in v0.7.0 also check system fences.
 - Aadhaar and card checks reject format-only matches. A different 12-digit or 13–19 digit string that happens to satisfy the checksum still fires. Random digit strings pass Verhoeff or Luhn about one time in ten.
 - API-key signals are shapes. `AKIAIOSFODNN7EXAMPLE` is the AWS documentation sample and it fires, because the shape matches.
-- URL-safe base64, a third encoding layer, leet or case-mixing inside a base64 blob, and instructions beyond the 4096-character decoding cap can pass. A second standard base64 layer is decoded. Percent-encoding and hex stay single-pass.
-- Hashed n-grams collide in 256 buckets. The bundled linear model fits 138 rows and uses a conservative intercept shift. Lexical matches and classifier scores provide limited coverage of new paraphrases.
+- A fifth encoding layer or a decisive phrase beyond the per-token or shared work limits can pass. Leet and case-mixing can destroy base64 bits. Inserted hyphens can be indistinguishable from URL-safe alphabet data.
+- Hashed n-grams collide in 256 buckets. The bundled linear model was fitted on 90 rows and uses a conservative intercept shift. Lexical matches and classifier scores provide limited coverage of new paraphrases.
 - PII detection is intentionally on original text. Obfuscated identifiers (including zero-width characters within an identifier) and unsupported shapes such as addresses, passwords, SSNs, IBANs, and passports may be missed.
 - The scanner does not know who wrote the text. A system prompt, a user message, and a tool result are scored the same way.
 - `categories` is empty for a classifier-only flag. Downstream policy that branches on category must treat that case as an unspecified positive.

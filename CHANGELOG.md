@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.7.0 — 2026-11-25
+
+The instruction scanner now decodes standard or URL-safe base64, hex and percent escapes on one breadth-first queue. Four layers cover a triple wrapper around an already encoded instruction. Each candidate contributes up to 4,096 ASCII characters. All codecs, orientations and repairs share 64 attempts and 32,768 input bytes. Failed attempts consume budget. Each distinct (codec, token) pair and each distinct recovered text is processed once. Extra outer repairs and reversals cover the first 16,384 characters. Intact candidates are scanned throughout the input.
+
+Decoded and reordered readings contribute decisive instruction matches. The same reporting and negation masks apply before transformation and after restoration, including inside a decoded message. Reordered system fences use the existing fence pattern. A recognized source code-language opener keeps its delimiter when words move, protecting ordinary code examples. Existing tests that specified single-pass percent decoding or unsuppressed encoded reports now assert the new contracts. The classifier, its feature layout and training data did not change.
+
+### Target families
+
+Bypass is the count of applicable variants that `Warden().scan` leaves unflagged at 0.5. We measured v0.6.0 before changing the scanner. The 78 flagged injection originals and ordered pipelines were fixed for both versions. Each changed (row, pipeline) counts once. Family rows can overlap. URL-safe fixtures include a UTF-8 prefix that produces both URL-specific symbols and trailing whitespace to exercise actual padding. Triple-wrapper rows cover all eight standard/URL-safe orders. The five URL-safe surface-repair rows include both operator orders.
+
+| Family | Applicable | v0.6.0 misses | v0.7.0 misses |
+|---|---:|---:|---:|
+| URL-safe base64, padded | 78 | 76 (97.44%) | 0 (0.00%) |
+| URL-safe base64, unpadded | 78 | 78 (100.00%) | 0 (0.00%) |
+| URL-safe and standard base64, both orders | 312 | 310 (99.36%) | 0 (0.00%) |
+| Three standard base64 wrappers | 78 | 78 (100.00%) | 0 (0.00%) |
+| Three wrappers including URL-safe base64 | 546 | 546 (100.00%) | 0 (0.00%) |
+| Double percent | 78 | 76 (97.44%) | 0 (0.00%) |
+| Double hex | 78 | 78 (100.00%) | 0 (0.00%) |
+| Word-order rewrite of the original corpus fence | 1 | 1 (100.00%) | 0 (0.00%) |
+| Fence wrapper then word reversal | 78 | 1 (1.28%) | 0 (0.00%) |
+| URL-safe base64 with spacing | 156 | 154 (98.72%) | 2 (1.28%) |
+| URL-safe base64 with punctuation splits | 156 | 155 (99.36%) | 81 (51.92%) |
+| URL-safe base64 with zero-width characters | 156 | 154 (98.72%) | 0 (0.00%) |
+| URL-safe base64 with diacritics | 156 | 154 (98.72%) | 0 (0.00%) |
+| URL-safe base64 with homoglyphs | 156 | 143 (91.67%) | 0 (0.00%) |
+
+The corpus contains one original system fence. Wrapping all 78 rows also tests the signal itself. v0.6.0 already flagged 77 of those reordered variants. The `system_fence` rule fired on 1/78 before and 77/78 after. One rewrite produced a literal Python opener. The code-fence guard preserved it and another signal flagged the row.
+
+### Previous fixed families
+
+The first replay enumerates all 121 ordered pairs of the 11 shipped TrustBreaker operators. The historical 2,960-variant replay uses the original v0.3.0 selection. Its row and pipeline indices were recovered from the seed-13, budget-40 reference and verified against the published 2,613/2,960 v0.3.0 misses. Neither scanner under comparison selects test variants.
+
+| Family | Applicable | v0.6.0 misses | v0.7.0 misses |
+|---|---:|---:|---:|
+| All shipped ordered pairs | 9,056 | 1,029 (11.36%) | 915 (10.10%) |
+| Pairs with exactly one reversal | 2,784 | 257 (9.23%) | 220 (7.90%) |
+| Reversal with spacing | 306 | 63 (20.59%) | 58 (18.95%) |
+| Reversal with leet | 312 | 86 (27.56%) | 84 (26.92%) |
+| Reversal with synonym substitution | 306 | 20 (6.54%) | 18 (5.88%) |
+| Leet with spacing | 156 | 48 (30.77%) | 46 (29.49%) |
+| Leet with punctuation splits | 156 | 48 (30.77%) | 46 (29.49%) |
+| Two standard base64 wrappers | 78 | 6 (7.69%) | 0 (0.00%) |
+| Base64 with spacing | 156 | 22 (14.10%) | 14 (8.97%) |
+| Base64 with punctuation splits | 156 | 23 (14.74%) | 17 (10.90%) |
+| Base64 with leet | 156 | 100 (64.10%) | 98 (62.82%) |
+| Base64 followed by leet | 78 | 78 (100.00%) | 78 (100.00%) |
+| Base64 followed by case mixing | 78 | 78 (100.00%) | 78 (100.00%) |
+| Historical fixed set | 2,960 | 569 (19.22%) | 524 (17.70%) |
+| Historical set containing character reversal | 710 | 118 (16.62%) | 113 (15.92%) |
+| Historical set containing word reversal | 710 | 139 (19.58%) | 120 (16.90%) |
+
+### Release gates
+
+| Corpus at 0.5 | Precision | Recall | F1 | FPR | Injection recall | PII recall | TP / FP / TN / FN |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Full, 181 rows | 0.9626 | 0.8512 | 0.9035 | 0.0667 | 78/81 | 25/40 | 103 / 4 / 56 / 18 |
+| Seed-13 holdout, 91 rows | 0.9630 | 0.8525 | 0.9043 | 0.0667 | 40/41 | 12/20 | 52 / 2 / 28 / 9 |
+
+The full set includes the model's 90 historical fitting rows. The holdout was inspected during development. All 229 public scan results across the benchmark and default examples matched v0.6.0 exactly, including all 88 benign scores, verdicts and signals. No classifier refit or benchmark training was performed.
+
+On CPython 3.12.3, 382 tests passed (335 existing cases plus 47 new cases). The pathological-input test exercised 30 base64 layers, a 1 MiB carrier, a repeated-candidate input and 2,000 nested percent escapes. The decoder took 0.55 s across the four inputs and peaked at 327,992 traced bytes, excluding the prebuilt inputs. Including the two end-to-end scans took 4.75 s. The scans peaked at 2,108,644 traced bytes. The test enforces a 4 MiB decoder peak, an 8 MiB scan peak and a 30-second subprocess timeout. Run `PYTHONPATH=src python -m pytest -q` for the suite or `PYTHONPATH=src python tests/test_decoding.py` for the resource measurements.
+
+From this checkout, run `PYTHONPATH=src python scripts/evaluate_compositions.py` with sibling TrustBreaker at `a8e182134708255930ba498b550fdcde7ce83adf`. For the baseline, point `PYTHONPATH` at the `src` of PromptWarden `0863462` and run the same script. The version and aggregate counts are printed. [Replay evaluator](scripts/evaluate_compositions.py) · [Historical schedule](evals/v030-replay.json)
+
+### Remaining limits
+
+Punctuation splitting can make a genuine URL-safe hyphen indistinguishable from an inserted separator. Some spaced compositions also miss. Leet and case mixing can destroy base64 bits. Synonym substitution has no general inverse. Reversed PII remains outside the instruction view. Inputs may exceed the depth, size or attempt budgets. The published 21.67% fresh adaptive bypass describes v0.6.0. No fresh v0.7.0 adaptive rate was measured.
+
 ## 0.6.0 — 2026-11-18
 
 - Add composed instruction views (`compose.py`). A de-spaced reading of reversed text, a reversed reading of de-leeted text, and a second standard-base64 decode now feed the same decisive instruction patterns as the direct view. Context masking runs on every reading, before and after the repair. The shared normalizer, n-grams, PII checks, and the bundled classifier are unchanged. The model was not refit.
