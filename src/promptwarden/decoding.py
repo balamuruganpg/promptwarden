@@ -92,6 +92,9 @@ def decoded_views(text: str) -> Iterator[str]:
 
     Depth, attempted bytes and candidate count are shared across codecs,
     orientations and repairs. Intermediate carriers need only be UTF-8.
+    Deleet and casefold of a decoded payload happen after this generator
+    returns and do not add attempts, depth, or candidate bytes. The bounds
+    above are the whole decoding budget.
     """
     queue = deque([(text, 0)])
     seen = {text}

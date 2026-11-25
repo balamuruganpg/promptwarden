@@ -9,6 +9,8 @@ a single normalize-then-reverse pass:
   shared normalizer, which also feeds the classifier
 * a second base64 wrap, or spaces, hyphens, marks, or lookalikes inside a
   base64 blob, never reaches the one-shot decoder
+* leet or case-mix inside a payload is still leetspeak after a successful decode
+* a hyphen between pieces longer than two letters survives the shared normalizer
 
 This module builds the missing readings. Callers may use them only for
 decisive instruction patterns. The shared normalizer, the n-gram view, and PII
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Callable
 from unicodedata import category
 
 from promptwarden.context import instruction_view
@@ -28,6 +31,7 @@ from promptwarden.normalize import (
     _LOOKALIKES,
     _SEPARATORS,
     _SHORT_WORDS,
+    _canonicalize,
     delete_ignorables,
     fold_unicode,
 )
@@ -132,8 +136,36 @@ _WIDE_REV_VOCAB: tuple[str, ...] = tuple(
     sorted({char_reverse(word) for word in _WIDE_VOCAB}, key=len, reverse=True)
 )
 _LOOSE_TOKEN = re.compile(r"[a-z013457]{3,160}")
+_DECODED_TOKEN = re.compile(r"[a-z013457]{1,160}")
 _LEET_DIGITS = frozenset("431057")
 _OTHER_DIGITS = frozenset("2689")
+# Joining only these short-word runs restores an instruction word. Other
+# all-short runs ("up-to-us", "a-b", "to-do") stay hyphenated.
+_SHORT_HYPHEN_WORDS = frozenset({"into"})
+# Ordinary words that show up in benign hyphenated compounds. A hyphen between
+# two of these, or between one of these and an instruction word, is not a
+# fragment split. "over-ride", "re-write", "content-filter", "pre-existing",
+# "well-known", and "state-of-the-art" stay split so they cannot become an
+# instruction phrase. Fragments such as "ig" / "nore" and "vious" are absent.
+_COMPOUND_WORDS = frozenset(
+    """
+    over ride under write written known part time well state art pre post re non
+    cross site built spell real long term high low full half ready made based free
+    level line side wide open source soft hard key word name type class case step
+    data back front client server peer only best effort day face status quo email
+    mail note sign hand stand alone form short down out off end checker settings
+    draft typo summary team channel cache header hotel dashboard queue roadmap
+    appendix examples request alarm compliance disturb false wiki http www api url
+    documentation attached document remain place design will release review please
+    before after show read send pages testing editor laptop decide green plant
+    bright light soil version includes file config room floor needs some
+    """.split()
+)
+_REAL_WORDS = frozenset(_VOCAB).union(_SHORT_WORDS, _COMPOUND_WORDS, _FOLDED_MULTILINGUAL)
+# One instruction phrase. Longer hyphen runs are left alone so a carrier
+# alphabet is not rewritten. The cap is the work bound for this view.
+_MAX_HYPHEN_PIECES = 48
+_MAX_HYPHEN_CHARS = 400
 
 # A base64 blob whose alphabet characters were split by a space or a hyphen.
 # Case is preserved: base64 is case-sensitive, so this repair must not casefold.
@@ -428,11 +460,193 @@ def composed_instruction_views(text: str, *, mask_first: bool) -> tuple[Instruct
     return tuple(views)
 
 
+def _is_mark(char: str) -> bool:
+    return category(char).startswith("M")
+
+
+def _real_word(word: str) -> bool:
+    return word in _REAL_WORDS
+
+
+def _is_word_piece(piece: str) -> bool:
+    """True when every character is a letter or a combining mark.
+
+    ``str.isalpha`` rejects a Devanagari anusvara or vowel sign, so a split
+    inside ``नजरअंदाज`` would otherwise be left broken.
+    """
+
+    return bool(piece) and all(char.isalpha() or _is_mark(char) for char in piece)
+
+
+def _should_glue(left: str, right: str) -> bool:
+    """Join two hyphen pieces when at least one is a fragment.
+
+    Two ordinary words stay apart (``over`` + ``ride``, ``content`` +
+    ``filter``). A one-letter stray mark in front of a whole word
+    (``x`` + ``ignore``) stays apart. Any other pair has a fragment:
+    ``ig`` + ``nore``, ``pre`` + ``vious``, ``every`` + ``thing``, or the two
+    halves of a word that is not in the list.
+    """
+
+    if _real_word(left) and _real_word(right):
+        return False
+    if len(left) == 1 and len(right) == 1:
+        return False
+    if len(left) == 1 and not _real_word(left) and _real_word(right):
+        return False
+    if len(right) == 1 and not _real_word(right) and _real_word(left):
+        return False
+    return True
+
+
+def _join_pieces(
+    raw: list[str],
+    phrase_match: Callable[[str], bool] | None,
+) -> str | None:
+    folded = [fold_unicode(piece) for piece in raw]
+    if any(not _is_word_piece(piece) for piece in folded):
+        return None
+    # Space the run before any fragment join. "ignore-all-previous-instructions"
+    # is already the instruction. "content-filter" and "over-ride" are not, so
+    # they fall through and stay split when both pieces are ordinary words.
+    if phrase_match is not None:
+        spaced = " ".join(raw)
+        if phrase_match(spaced):
+            return spaced
+    if all(piece in _SHORT_WORDS for piece in folded):
+        if "".join(folded) in _SHORT_HYPHEN_WORDS:
+            return "".join(raw)
+        return None
+    groups: list[tuple[str, str]] = [(raw[0], folded[0])]
+    glued = False
+    for raw_piece, fold_piece in zip(raw[1:], folded[1:], strict=True):
+        prev_raw, prev_fold = groups[-1]
+        if _should_glue(prev_fold, fold_piece):
+            groups[-1] = (prev_raw + raw_piece, prev_fold + fold_piece)
+            glued = True
+        else:
+            groups.append((raw_piece, fold_piece))
+    if not glued:
+        return None
+    if len(groups) == 1:
+        return groups[0][0]
+    return " ".join(piece for piece, _folded in groups)
+
+
+def dehyphen(text: str, *, phrase_match: Callable[[str], bool] | None = None) -> str:
+    """Join hyphen splits that are not benign hyphenated compounds.
+
+    Hyphen-newline (``ig-\\nnore``) and an intra-word hyphen (``ig-nore``,
+    ``pre-vious``) concatenate fragments. A run of ordinary words becomes
+    spaces only when that run is already a decisive instruction phrase.
+    ``over-ride``, ``re-write``, ``content-filter``, ``the-system-prompt``,
+    ``well-known``, ``state-of-the-art``, and ``up-to-us`` stay hyphenated.
+    """
+
+    if "-" not in text:
+        return text
+    out: list[str] = []
+    index = 0
+    limit = len(text)
+    while index < limit:
+        previous = text[index - 1] if index else ""
+        if not text[index].isalpha() or (previous.isalnum() or previous == "_"):
+            out.append(text[index])
+            index += 1
+            continue
+        start = index
+        raw: list[str] = []
+        while index < limit and text[index].isalpha():
+            end = index + 1
+            while end < limit and (text[end].isalpha() or _is_mark(text[end])):
+                end += 1
+            raw.append(text[index:end])
+            index = end
+            cursor = index
+            if cursor < limit and text[cursor] == "-":
+                cursor += 1
+                if cursor < limit and text[cursor] == "\r":
+                    cursor += 1
+                if cursor < limit and text[cursor] == "\n":
+                    cursor += 1
+                    while cursor < limit and text[cursor] in " \t":
+                        cursor += 1
+                if cursor < limit and text[cursor].isalpha():
+                    index = cursor
+                    continue
+            break
+        joined = None
+        run = text[start:index]
+        if (
+            len(raw) >= 2
+            and len(raw) <= _MAX_HYPHEN_PIECES
+            and len(run) <= _MAX_HYPHEN_CHARS
+        ):
+            joined = _join_pieces(raw, phrase_match)
+        out.append(joined if joined is not None else run)
+    return "".join(out)
+
+
+def _decoded_deleet(text: str) -> str:
+    """Map leet digits in one already-decoded, casefolded payload.
+
+    The shared normalizer refuses a one-letter remnant (``7h3``) and a pure
+    digit token (``45`` for ``as``, ``70`` for ``to``). Both are reversible
+    for the six leet digits, and this reading is decisive-only. A token that
+    contains any other digit is left alone so ordinary numbers stay numbers.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        word = match.group(0)
+        if any(char in _OTHER_DIGITS for char in word):
+            return word
+        if word.isalpha() or not any(char in _LEET_DIGITS for char in word):
+            return word
+        return word.translate(_LEET)
+
+    return _DECODED_TOKEN.sub(replace, text)
+
+
+def _casefold_first(text: str) -> str:
+    """Casefold before lookalike translation.
+
+    The shared fold maps a capital lookalike before casefolding, so a
+    case-mixed Cyrillic letter whose capital is in the map and whose
+    lowercase is not (``Н`` versus ``н``) is destroyed. Casefolding first
+    puts that letter back. Greek capital upsilon still maps to ``y`` on the
+    shared fold; this view is an extra reading, not a replacement.
+    """
+
+    return fold_unicode(_canonicalize(text).casefold())
+
+
+def decoded_decisive_views(text: str) -> tuple[str, ...]:
+    """Masked deleet readings of one decoded payload.
+
+    Each reading is a linear scan of text the decoder already produced. No
+    codec is attempted and the decode budget is unchanged.
+    """
+
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    seen: set[str] = set()
+    views: list[str] = []
+    for base in (fold_unicode(text), _casefold_first(text)):
+        masked = instruction_view(_decoded_deleet(base))
+        if masked in seen:
+            continue
+        seen.add(masked)
+        views.append(masked)
+    return tuple(views)
+
+
 def encoding_surface(text: str) -> str:
     """Restore a base64 blob that was split, marked, or lookalike-folded.
 
-    Case is preserved. Leet and case-mixing are not undone: both destroy
-    base64 bits, and guessing them would decode unrelated alphabet soup.
+    Case is preserved. Leet and case-mixing of the carrier alphabet are not
+    undone: both destroy base64 bits, and guessing them would decode unrelated
+    alphabet soup. Leet or case-mix inside a payload is repaired after a
+    successful decode, on the decoded text, not by editing the carrier.
     """
 
     if not isinstance(text, str):

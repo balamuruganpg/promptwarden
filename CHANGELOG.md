@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.8.0 — 2026-11-25
+
+Decoded instruction text is deleeted and casefolded again, and a dehyphenated view joins fragment hyphens. The bundled classifier was not refit. Corpus scores are unchanged.
+
+v0.7.0 decoded a payload and then ran the shared normalizer. That normalizer refuses a one-letter leet remnant, a pure digit token (`70` for `to`, `45` for `as`), and a three-digit run (`710` inside the leet form of `instructions`). Casefolding after lookalike translation also drops a case-mixed Cyrillic letter whose capital is in the lookalike map and whose lowercase is not. Those payloads stayed leetspeak after a successful decode. The extra readings run on text the decoder already yielded. They do not add a codec attempt, a depth level, or candidate bytes. The same casefold is not applied to cleartext, so the shared fold used by the reference scans stays put.
+
+The shared normalizer joins a hyphen run only when every piece is one or two letters and there are at least three pieces. `ig-nore` and `pre-vious` survive, and a hyphen at a line break is not a join. The dehyphenated view concatenates a fragment to its neighbor, including across a hyphen-newline, and it turns a whole run into spaces only when that run alone matches a decisive instruction pattern. `over-ride`, `re-write`, `content-filter`, `the-system-prompt`, `well-known`, `state-of-the-art`, `up-to-us`, and `a-b` stay hyphenated. A run longer than 400 characters or 48 pieces is left unchanged so a carrier is not rewritten. Devanagari vowel signs and anusvara stay on the letter they follow.
+
+### Measured bypass
+
+Bypass is an applicable variant that `Warden().scan` leaves unflagged at 0.5. Sources are the 78 corpus injection rows v0.7.1 flags. Decisive rows are the 72 whose direct rules already fire an instruction signal other than `encoded_payload`. Leet maps `aeiostAEIOST` to `431057431057` and then wraps that text in standard base64, percent-encoding (`quote` with `safe=""`), or hex. Case-mix alternates upper and lower and skips a character whose case pair is not one code point. Intra-word cuts use the first, longest, and last letter run of length at least 4, at offsets 1, `len//2`, and `2*len//3`, with separators `-` and `-\n`. Two further families split every long word at its midpoint, or replace each space with a hyphen. The same probe was scored before the change and after it. A variant that does not change the text is omitted.
+
+| Family | Applicable (decisive) | v0.7.1 misses | v0.7.1 decisive | v0.8.0 misses | v0.8.0 decisive |
+|---|---:|---:|---:|---:|---:|
+| Leet inside base64 | 73 (67) | 21 (28.77%) | 16 (23.88%) | 5 (6.85%) | 0 (0.00%) |
+| Leet inside percent | 73 (67) | 21 (28.77%) | 16 (23.88%) | 5 (6.85%) | 0 (0.00%) |
+| Leet inside hex | 73 (67) | 15 (20.55%) | 12 (17.91%) | 3 (4.11%) | 0 (0.00%) |
+| Case-mix inside base64 | 74 (68) | 4 (5.41%) | 1 (1.47%) | 3 (4.05%) | 0 (0.00%) |
+| Case-mix inside percent | 74 (68) | 4 (5.41%) | 1 (1.47%) | 3 (4.05%) | 0 (0.00%) |
+| Case-mix inside hex | 74 (68) | 4 (5.41%) | 1 (1.47%) | 3 (4.05%) | 0 (0.00%) |
+| Intra-word hyphen, offset 1 | 203 (186) | 51 (25.12%) | 45 (24.19%) | 4 (1.97%) | 0 (0.00%) |
+| Hyphen-newline, offset 1 | 203 (186) | 54 (26.60%) | 49 (26.34%) | 5 (2.46%) | 0 (0.00%) |
+| Intra-word hyphen, midpoint | 203 (186) | 49 (24.14%) | 43 (23.12%) | 4 (1.97%) | 0 (0.00%) |
+| Hyphen-newline, midpoint | 203 (186) | 53 (26.11%) | 49 (26.34%) | 4 (1.97%) | 0 (0.00%) |
+| Intra-word hyphen, two thirds | 176 (162) | 42 (23.86%) | 37 (22.84%) | 3 (1.70%) | 0 (0.00%) |
+| Hyphen-newline, two thirds | 176 (162) | 46 (26.14%) | 42 (25.93%) | 4 (2.27%) | 0 (0.00%) |
+| Intra-word hyphen, every long word | 75 (69) | 69 (92.00%) | 65 (94.20%) | 6 (8.00%) | 3 (4.35%) |
+| Hyphen-newline, every long word | 75 (69) | 70 (93.33%) | 66 (95.65%) | 8 (10.67%) | 4 (5.80%) |
+| Spaces replaced by hyphens | 75 (70) | 64 (85.33%) | 61 (87.14%) | 8 (10.67%) | 5 (7.14%) |
+
+Decisive leet and case-mix inside each encoding are 0. The residual misses on those families are non-decisive originals: restoring the words does not create an instruction pattern the rules did not already have. Single-cut intra-word hyphens and hyphen-newlines are 0 on the decisive subset.
+
+The v0.7.0 figure of 78/78 is a different order. Leet or case-mix applied to the base64 alphabet *after* encoding destroys bits. v0.7.0 measured base64-then-leet and base64-then-case-mix at 78/78. This release does not guess damaged alphabet bits. A canonical instruction wrapped in base64 and then leeted or case-mixed still scans clear.
+
+### Benign controls
+
+The eighteen v0.7.1 controls stay unflagged at the same scores: accented Latin, Chinese, Japanese, Korean, Arabic, Arabic with harakat, Hebrew, Hebrew with niqqud, and the emoji ZWJ sentences (family, developer, flags, couple, thumbs-up, heart and star).
+
+Hyphenated prose that must not become an instruction also stays clear. That set is `over-ride` inside "we will not over-ride the safety checks", `content-filter` inside "please ignore the content-filter settings", `the-system-prompt` inside "read the-system-prompt documentation tomorrow", plus `re-write`, `pre-existing`, `up-to-us`, `part-time`, `state-of-the-art`, `follow-up`, `well-known`, `a-b`, pages `4-5`, `x-ignore-cache`, a negated `ig-nore`, and a quoted `ignore-all-previous-instructions`.
+
+All 229 reference scans (181 corpus rows and 48 default examples) match v0.7.1 exactly, including score, flagged, categories, and signals. Those rows are not the leet-inside-encoding or hyphen-split variants in the probe, so the new views do not move the reference set.
+
+Full-corpus confusion stays 103 / 4 / 56 / 18 (precision 0.9626, recall 0.8512, F1 0.9035, FPR 0.0667). Injection recall stays 78/81 (0.9630). PII recall stays 25/40 (0.6250). The seed-13 holdout stays 52 / 2 / 28 / 9 (F1 0.9043, FPR 0.0667), injection 40/41 (0.9756), PII 12/20 (0.6000).
+
+### Budget
+
+The decoding budget is unchanged: depth 4, 4,096 candidate characters, 32,768 total candidate bytes, 64 attempts, and the first 16,384 characters for extra root readings. Deleet, casefold-first, and dehyphen do not add attempts, depth, or candidate bytes. Dehyphen also refuses a run longer than 400 characters or 48 pieces.
+
+On CPython 3.12.3 the pathological-input test still enforces a 4 MiB decoder peak, an 8 MiB scan peak, a 24-second measurement ceiling, and a 30-second subprocess timeout. It exercises 30 base64 layers, a 1 MiB carrier, a repeated-candidate input, and 2,000 nested percent escapes. This checkout measured decoder 1.42 s and 327,992 traced bytes, and 7.02 s and 2,107,867 traced bytes once the two end-to-end scans are included. v0.7.0 reported 0.55 s / 327,992 bytes and 4.75 s / 2,108,644 bytes on the same ceilings. The byte peaks match. Wall time is higher and still inside the test.
+
+On CPython 3.12.3, 403 tests passed. That is the previous 390 plus 13 evasion cases. `ruff check` and `mypy` report no issues.
+
+### Remaining limits
+
+Leet and case-mix of the carrier alphabet remain open (v0.7.0: 78/78 for base64 followed by either operator). A hyphen between two ordinary words stays split, so `over-ride` does not become `override`. That split is every remaining decisive miss when every long word is cut at its midpoint (3/69 intra-word, 4/69 hyphen-newline). Replacing every space with a hyphen still misses 5/70 decisive rows: the spaced sentence is not itself a decisive phrase, because the original signal depends on reversal, leet, or other wording, or the original was non-decisive and never had a lexical pattern. URL-safe hyphens are still ambiguous with inserted separators. Synonym substitution is not inverted. Inputs may exceed the depth, size, or attempt budgets. The v0.7.1 limits that are not these two classes also remain: a one-character word jammed onto a word outside the boundary list can fuse, and "into" is one listed word on the shared normalizer. Cleartext case-mix of the Russian example stays unflagged on purpose. The same text inside base64, percent, or hex flags.
+
 ## 0.7.1 — 2026-11-25
 
 Normalization now folds compatibility forms and strips format and non-whitespace control characters before any instruction view is built. v0.7.0 deleted only U+200B, U+200C, U+200D, and U+FEFF. A bidi mark, word joiner, soft hyphen, NUL, or fullwidth letter could still hide "Ignore all previous instructions". The bundled classifier was not refit. Corpus scores are unchanged.

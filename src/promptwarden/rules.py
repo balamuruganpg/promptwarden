@@ -18,7 +18,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from promptwarden.compose import composed_instruction_views
+from promptwarden.compose import composed_instruction_views, decoded_decisive_views, dehyphen
 from promptwarden.context import instruction_view
 from promptwarden.decoding import TOKEN_CHARS, decoded_views
 from promptwarden.normalize import fold_unicode, normalize
@@ -335,10 +335,11 @@ def detect(text: str) -> tuple[Signal, ...]:
     """Return signals in stable order, preserving identifiers and encoded bytes.
 
     Prose rules use the context view. Control syntax uses normalized text, and
-    PII and encoded candidates use the original. A reversed view or a composed
-    repair (de-spacing, loose de-leet, nested decoding) can add a decisive
-    instruction signal. It cannot add a PII signal. Classifier n-grams stay on
-    the direct normalized view.
+    PII and encoded candidates use the original. A reversed view, a composed
+    repair (de-spacing, loose de-leet, nested decoding), or a dehyphenated
+    view can add a decisive instruction signal. It cannot add a PII signal.
+    Classifier n-grams stay on the direct normalized view. Decoded payloads
+    also get a deleeted, casefolded reading inside the existing decode budget.
     """
 
     if not isinstance(text, str):
@@ -465,9 +466,23 @@ def _encoded_payload(text: str) -> bool:
         contextual = instruction_view(normalize(decoded))
         if any(_CHECKS[name](contextual) for name in _DECISIVE_INSTRUCTIONS):
             return True
+        # Deleet and casefold-first stay on text the decoder already yielded.
+        # They do not open another codec attempt.
+        if any(
+            view != contextual and any(_CHECKS[name](view) for name in _DECISIVE_INSTRUCTIONS)
+            for view in decoded_decisive_views(decoded)
+        ):
+            return True
         if _extra_instruction_names(decoded):
             return True
     return False
+
+
+def _hyphen_phrase(phrase: str) -> bool:
+    """True when a hyphen run is an instruction with the hyphens removed."""
+
+    masked = instruction_view(fold_unicode(phrase))
+    return any(_CHECKS[name](masked) for name in _DECISIVE_INSTRUCTIONS)
 
 
 def _extra_instruction_names(text: str) -> set[str]:
@@ -478,11 +493,28 @@ def _extra_instruction_names(text: str) -> set[str]:
     if len(text) > TOKEN_CHARS and _LONG_WORD.fullmatch(text):
         return set()
     found: set[str] = set()
-    for readings in (instruction_views, composed_instruction_views):
-        for view in readings(text, mask_first=True):
+    sources = [text]
+    # Fragment joins always run. A run of whole words is spaced only when that
+    # run is already a decisive phrase, so a benign compound stays hyphenated.
+    # Reversal views do not include the forward reading, so the repaired text
+    # is checked directly as well as through those views.
+    repaired = dehyphen(text, phrase_match=_hyphen_phrase)
+    if repaired != text:
+        sources.append(repaired)
+        direct = (
+            instruction_view(normalize(repaired)),
+            instruction_view(fold_unicode(repaired)),
+        )
+        for masked in direct:
             for name in _DECISIVE_INSTRUCTIONS:
-                if name not in found and _CHECKS[name](view.text):
+                if name not in found and _CHECKS[name](masked):
                     found.add(name)
+    for source in sources:
+        for readings in (instruction_views, composed_instruction_views):
+            for reading in readings(source, mask_first=True):
+                for name in _DECISIVE_INSTRUCTIONS:
+                    if name not in found and _CHECKS[name](reading.text):
+                        found.add(name)
     return found
 
 
