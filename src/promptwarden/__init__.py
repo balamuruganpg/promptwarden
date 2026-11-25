@@ -3,4 +3,4 @@
 from promptwarden.warden import ScanResult, Warden
 
 __all__ = ["ScanResult", "Warden"]
-__version__ = "0.8.0"
+__version__ = "0.8.1"

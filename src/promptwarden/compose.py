@@ -38,6 +38,7 @@ from promptwarden.normalize import (
 from promptwarden.reversal import (
     _VOCAB,
     InstructionView,
+    _anchor_split,
     char_reverse,
     instruction_bases,
     word_reverse,
@@ -132,6 +133,7 @@ _FOLDED_MULTILINGUAL: tuple[str, ...] = tuple(
 _WIDE_VOCAB: tuple[str, ...] = tuple(
     sorted(set(_VOCAB).union(_FOLDED_MULTILINGUAL), key=len, reverse=True)
 )
+_WIDE_VOCAB_SET = frozenset(_WIDE_VOCAB)
 _WIDE_REV_VOCAB: tuple[str, ...] = tuple(
     sorted({char_reverse(word) for word in _WIDE_VOCAB}, key=len, reverse=True)
 )
@@ -333,6 +335,9 @@ def _cover_token(token: str, vocab: tuple[str, ...]) -> str:
                 words[end] = count + 1
                 pred[end] = (index, word)
     if words[limit] < 2:
+        anchored = _anchor_split(token, vocab)
+        if anchored is not None:
+            return anchored
         return token
     pieces: list[tuple[str, str]] = []
     cursor = limit
@@ -421,6 +426,27 @@ def _loose_deleet(text: str) -> str:
     return _LOOSE_TOKEN.sub(replace, text)
 
 
+def _restore_unreversed_words(text: str) -> str:
+    """Flip a short word back when character reversal was applied to every word.
+
+    Spacing reverses only the long words. A later character reversal restores
+    those words and also flips the short ones that never moved (``las`` becomes
+    ``sal``). Put a short word back when its flip is a vocabulary word and the
+    word itself is not.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        word = match.group(0)
+        if word in _WIDE_VOCAB_SET:
+            return word
+        flipped = char_reverse(word)
+        if flipped != word and flipped in _WIDE_VOCAB_SET:
+            return flipped
+        return word
+
+    return _LOOSE_TOKEN.sub(replace, text)
+
+
 def _readings(text: str) -> list[tuple[str, bool]]:
     """Repair one base into decisive readings, retaining orientation metadata."""
 
@@ -438,7 +464,7 @@ def _readings(text: str) -> list[tuple[str, bool]]:
     if joined != folded:
         backward = _segment_wide(deleeted, _WIDE_REV_VOCAB)
         if backward != deleeted:
-            restored = char_reverse(backward)
+            restored = _restore_unreversed_words(char_reverse(backward))
             readings.append((restored, True))
             readings.append((word_reverse(restored), False))
     return readings

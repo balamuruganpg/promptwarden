@@ -14,13 +14,24 @@ blank and a restored negation is still a negation.
 
 Punctuation splits, intra-word zero-width characters, and single-letter
 spacing do not commute with reversal, so each masked base is reversed both
-before and after normalization. Hyphen runs shorter than four letters are
-rejoined on these views only; the shared normalizer leaves them split so
-that ``up-to-us`` stays a phrase. Leet decoding on the reversed view also
-accepts a digit run. The strict decoder refuses ``710`` inside the leet form
-of ``instructions``, which would otherwise hide that word. Tokens that
-spacing rejoins into one blob are split only when the whole token is a
-sequence of words the instruction rules already name.
+before and after normalization. Format characters are word boundaries for
+``word_reverse`` and are deleted before those views are built. When any
+format or non-whitespace control sits in the first ``PRESERVE_CHARS``
+characters, the word order is restored on that window first and the
+canonical reading is checked forward. Reported quotes and negated actions
+are blanked on that window before the words move, using the canonical
+sentence so a mark inside a word such as ``recorded`` still counts.
+That window is the same 16,384
+characters the decoder uses for an extra root reading. Hyphen runs shorter
+than four letters are rejoined on these views only; the shared normalizer
+leaves them split so that ``up-to-us`` stays a phrase. Leet decoding on the
+reversed view accepts a digit run, a one-letter remnant, and a pure leet
+digit token. The strict decoder refuses ``710`` inside the leet form of
+``instructions``, which would otherwise hide that word. A fused token is
+split when vocabulary words cover it, and also when a vocabulary word of
+at least four letters sits beside a leftover of at least four letters. A
+leftover shorter than four stays put, so ``ignorance`` and ``overall`` are
+not cut open.
 """
 
 from __future__ import annotations
@@ -35,13 +46,19 @@ from promptwarden.normalize import (
     _LEET,
     _SHORT_WORDS,
     _canonicalize,
+    _is_ignorable,
     delete_ignorables,
     fold_unicode,
     normalize,
 )
 
-_LOOSE_LEET = re.compile(r"\b[a-z013457]{3,32}\b")
+# Same window as decoding.SURFACE_CHARS. Imported there would cycle.
+PRESERVE_CHARS = 16 * 1024
+_LOOSE_LEET = re.compile(r"\b[a-z013457]{2,32}\b")
+_LEET_DIGITS = frozenset("431057")
+_OTHER_DIGITS = frozenset("2689")
 _TOKEN = re.compile(r"[a-z0-9]+")
+_ANCHOR_MIN = 4
 # The shared normalizer keeps a joined fragment only at length >= 4, so
 # punct-split "n-o-w" / "a-l-l" stay broken and word reversal then slides
 # the long words into the wrong slots. Rejoin those short runs here only.
@@ -259,9 +276,20 @@ def _prepare(text: str) -> str:
 
 
 def _loose_deleet(text: str) -> str:
+    """Map leet digits, including a one-letter remnant and a pure digit token.
+
+    The shared normalizer refuses both, and it refuses a three-digit run, so
+    ``7h3`` and ``710`` stay leetspeak on the classifier view. This reading is
+    decisive-only. A token that contains any other digit is left alone.
+    """
+
     def replace(match: re.Match[str]) -> str:
         word = match.group(0)
-        if word.isalpha() or sum(char.isalpha() for char in word) < 2:
+        if word.isalpha():
+            return word
+        if any(char in _OTHER_DIGITS for char in word):
+            return word
+        if not any(char in _LEET_DIGITS for char in word):
             return word
         return word.translate(_LEET)
 
@@ -275,7 +303,7 @@ def segment_token(
     max_len: int = _SEGMENT_MAX,
     min_len: int = 8,
 ) -> str:
-    """Split one fused token. Unchanged unless two or more words cover it."""
+    """Split one fused token. Unchanged unless two or more pieces cover it."""
 
     if len(token) < min_len or len(token) > max_len:
         return token
@@ -292,9 +320,53 @@ def segment_token(
                 if current is None or len(candidate) < len(current):
                     best[end] = candidate
     done = best[-1]
-    if done is None or len(done) < 2:
-        return token
-    return " ".join(done)
+    if done is not None and len(done) >= 2:
+        return " ".join(done)
+    anchored = _anchor_split(token, vocab)
+    if anchored is not None:
+        return anchored
+    return token
+
+
+def _anchor_split(token: str, vocab: tuple[str, ...]) -> str | None:
+    """Split a long vocabulary word off a fused token.
+
+    The strict cover requires every character to be a vocabulary word. Spacing
+    also fuses an ordinary word onto one (``please`` + ``ignore``). A vocabulary
+    word shorter than four letters is not an anchor, so ``overall`` keeps
+    ``all``. A leftover shorter than four letters rejects the split, so
+    ``ignorance`` keeps its ending.
+    """
+
+    if len(token) < 8:
+        return None
+    pieces: list[tuple[bool, str]] = []
+    index = 0
+    limit = len(token)
+    found = False
+    while index < limit:
+        match: str | None = None
+        for word in vocab:
+            if len(word) < _ANCHOR_MIN or len(word) > limit - index:
+                continue
+            if token.startswith(word, index):
+                match = word
+                break
+        if match is None:
+            if pieces and not pieces[-1][0]:
+                pieces[-1] = (False, pieces[-1][1] + token[index])
+            else:
+                pieces.append((False, token[index]))
+            index += 1
+            continue
+        pieces.append((True, match))
+        found = True
+        index += len(match)
+    if not found or len(pieces) < 2:
+        return None
+    if any(not is_word and len(gap) < _ANCHOR_MIN for is_word, gap in pieces):
+        return None
+    return " ".join(piece for _is_word, piece in pieces)
 
 
 def segment_fused(
@@ -303,11 +375,12 @@ def segment_fused(
     vocab: tuple[str, ...] | None = None,
     max_len: int = _SEGMENT_MAX,
 ) -> str:
-    """Split fused ASCII tokens into ``vocab`` words when the whole token is covered.
+    """Split fused ASCII tokens into ``vocab`` words.
 
-    A token is left unchanged unless every character belongs to at least two
-    vocabulary words. Ordinary words are not cut open. ``max_len`` bounds the
-    dynamic program.
+    A token is left unchanged unless vocabulary words cover it, or one
+    vocabulary word of at least four letters sits beside a leftover of at
+    least four letters. Ordinary words are not cut open. ``max_len`` bounds
+    the dynamic program.
     """
 
     words = _VOCAB if vocab is None else vocab
@@ -364,7 +437,114 @@ def _views_from(base: str) -> list[InstructionView]:
         InstructionView(instruction_view(_segment(text)), characters_only)
         for text, characters_only in _expansions(prepared)
     )
+    # Spacing fuses adjacent long words, and word reversal of that blob is a
+    # no-op. Split first, then reverse, so the original word order comes back.
+    segmented = _segment(prepared)
+    if segmented != prepared:
+        views.extend(
+            InstructionView(instruction_view(text), characters_only)
+            for text, characters_only in _expansions(segmented)
+        )
     return views
+
+
+def _masked_needles(canon: str, masked: str) -> list[str]:
+    """Return the canonical slices ``instruction_view`` replaced."""
+
+    needles: list[str] = []
+    index = 0
+    limit = len(canon)
+    while index < limit:
+        if masked[index] == canon[index]:
+            index += 1
+            continue
+        end = index + 1
+        while end < limit and masked[end] != canon[end]:
+            end += 1
+        needles.append(canon[index:end])
+        index = end
+    return needles
+
+
+def _find_with_ignorables(raw: str, needle: str, start: int) -> tuple[int, int] | None:
+    """Find ``needle`` in ``raw``, allowing format and control characters inside it."""
+
+    limit = len(raw)
+    origin = start
+    while origin < limit:
+        if _is_ignorable(raw[origin]):
+            origin += 1
+            continue
+        cursor = origin
+        matched = True
+        for char in needle:
+            while cursor < limit and _is_ignorable(raw[cursor]):
+                cursor += 1
+            if cursor >= limit or raw[cursor] != char:
+                matched = False
+                break
+            cursor += 1
+        if matched:
+            return origin, cursor
+        origin += 1
+    return None
+
+
+def _blank_canonical_masks(raw: str) -> str:
+    """Blank spans the canonical sentence masks, keeping mark positions.
+
+    ``instruction_view`` sees the sentence after format characters are
+    deleted, so ``rec`` + ZWSP + ``orded`` is still a reporting verb. The
+    same span on the raw window has to be blank before ``word_reverse``
+    moves words across the quote.
+    """
+
+    canon = _canonicalize(raw)
+    masked = instruction_view(canon)
+    if masked == canon:
+        return raw
+    chars = list(raw)
+    cursor = 0
+    for needle in _masked_needles(canon, masked):
+        found = _find_with_ignorables(raw, needle, cursor)
+        if found is None:
+            continue
+        start, end = found
+        cursor = end
+        for index in range(start, end):
+            if chars[index] not in "\r\n":
+                chars[index] = " "
+    return "".join(chars)
+
+
+def presplit_word_order(text: str, *, mask_first: bool = False) -> str | None:
+    """Restore word order while format characters are still boundaries.
+
+    ``word_reverse`` treats a format or non-whitespace control as a word
+    break. The other views delete those characters first, which glues the
+    letters into the wrong groups. Reversing the leading window first puts
+    the breaks back. The result is canonical. Reported quotes and negated
+    actions are blanked first, in the original orientation, so a restored
+    reading cannot carry a quoted instruction out of its quotes. ``None``
+    when the window has no such character or the orientation does not
+    change it.
+    """
+
+    window = text[:PRESERVE_CHARS]
+    if not any(_is_ignorable(char) for char in window):
+        return None
+    source = _blank_canonical_masks(window) if mask_first else window
+    reordered = word_reverse(source)
+    if reordered == source:
+        return None
+    # Drop the boundary marks without the shared segmenter. That segmenter
+    # splits "openai" into "open a i" once a mark has separated the letters.
+    # Zero-width reversal keeps the real spaces, so deletion is the inverse.
+    restored = delete_ignorables(reordered)
+    restored = _canonicalize(restored)
+    if restored == _canonicalize(delete_ignorables(window)):
+        return None
+    return restored
 
 
 def masked_surface(text: str) -> str:
@@ -430,4 +610,22 @@ def instruction_views(text: str, *, mask_first: bool) -> tuple[InstructionView, 
             if view.text not in seen:
                 seen.add(view.text)
                 views.append(view)
+    restored = presplit_word_order(text, mask_first=mask_first)
+    if restored is not None:
+        # The restored window can itself be a reversed instruction (a corpus
+        # row that was already reversed, then reversed again around a format
+        # mark). Run the ordinary reversal readings on it, and also keep the
+        # forward reading so a restored clear instruction is not flipped back.
+        for view in _views_from(restored):
+            if view.text not in seen:
+                seen.add(view.text)
+                views.append(view)
+        # Loose deleet runs in _prepare. The strict normalizer would leave
+        # "7h3" and "574ck" in a restored leet sentence.
+        forward = _segment(_prepare(restored))
+        if mask_first:
+            forward = instruction_view(forward)
+        if forward not in seen:
+            seen.add(forward)
+            views.append(InstructionView(forward, True))
     return tuple(views)
