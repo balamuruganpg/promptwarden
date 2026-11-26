@@ -8,6 +8,7 @@ from collections import deque
 from collections.abc import Iterator
 from urllib.parse import unquote_to_bytes
 
+from promptwarden.carrier import MAX_REPAIR_CHARS, REPAIR_COST, recover_prose, repair_alphabet
 from promptwarden.compose import encoding_surface
 from promptwarden.reversal import char_reverse, masked_surface, word_reverse
 
@@ -76,7 +77,7 @@ def _surfaces(text: str, *, root: bool) -> Iterator[str]:
                 yield repaired
 
 
-def _candidates(text: str) -> Iterator[tuple[str, str]]:
+def _candidates(text: str) -> Iterator[tuple[str, str, int]]:
     for kind, pattern in (("hex", _HEX), ("base64", _B64), ("percent", _URL_TOKEN)):
         if kind == "percent" and "%" not in text:
             continue
@@ -84,26 +85,28 @@ def _candidates(text: str) -> Iterator[tuple[str, str]]:
             start, end = match.span()
             token = text[start : min(end, start + TOKEN_CHARS)]
             if kind != "percent" or _ESCAPE.search(token):
-                yield kind, token
+                yield kind, token, end
 
 
-def decoded_views(text: str) -> Iterator[str]:
-    """Yield each distinct decoded reading once, shallowest first.
+def decoded_groups(text: str) -> Iterator[tuple[str, ...]]:
+    """Yield strict singletons first, then complete groups of possible repairs.
 
     Depth, attempted bytes and candidate count are shared across codecs,
     orientations and repairs. Intermediate carriers need only be UTF-8.
     Deleet and casefold of a decoded payload happen after this generator
     returns and do not add attempts, depth, or candidate bytes. The bounds
-    above are the whole decoding budget.
+    above are the whole decoding budget. Alphabet recovery uses only the
+    allowance left over after all strict readings, including nested ones.
     """
     queue = deque([(text, 0)])
     seen = {text}
     attempted: set[tuple[str, str]] = set()
+    failed_carriers: list[str] = []
     bytes_left = TOTAL_BYTES
     while queue:
         parent, depth = queue.popleft()
-        for surface in _surfaces(parent, root=depth == 0):
-            for kind, token in _candidates(surface):
+        for index, surface in enumerate(_surfaces(parent, root=depth == 0)):
+            for kind, token, end in _candidates(surface):
                 if (kind, token) in attempted or len(token) > bytes_left:
                     continue
                 if len(attempted) == MAX_ATTEMPTS:
@@ -118,11 +121,47 @@ def decoded_views(text: str) -> Iterator[str]:
                     else:
                         raw = unquote_to_bytes(token)
                     child = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    # Only complete tokens in the masked, source-order window.
+                    # A reversed or truncated copy could omit reporting context.
+                    if (
+                        kind == "base64"
+                        and index == 0
+                        and end <= SURFACE_CHARS
+                        and len(token) <= MAX_REPAIR_CHARS
+                    ):
+                        failed_carriers.append(token)
+                    continue
                 except ValueError:
                     continue
                 if child in seen:
                     continue
                 seen.add(child)
-                yield child
+                yield (child,)
                 if depth + 1 < MAX_DEPTH:
                     queue.append((child, depth + 1))
+
+    attempts_left = MAX_ATTEMPTS - len(attempted)
+    for token in failed_carriers:
+        if attempts_left < REPAIR_COST:
+            break
+        charge = REPAIR_COST * len(token)
+        if charge > bytes_left:
+            continue
+        alphabet = repair_alphabet(token)
+        if alphabet is None:
+            continue
+        attempts_left -= REPAIR_COST
+        bytes_left -= charge
+        readings = recover_prose(token, alphabet)
+        if readings and (len(readings) > 1 or readings[0] not in seen):
+            if len(readings) == 1:
+                seen.add(readings[0])
+            yield readings
+
+
+def decoded_views(text: str) -> Iterator[str]:
+    """Yield distinct, individually determined texts in decoding order."""
+    for readings in decoded_groups(text):
+        if len(readings) == 1:
+            yield readings[0]

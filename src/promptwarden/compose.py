@@ -603,11 +603,7 @@ def dehyphen(text: str, *, phrase_match: Callable[[str], bool] | None = None) ->
             break
         joined = None
         run = text[start:index]
-        if (
-            len(raw) >= 2
-            and len(raw) <= _MAX_HYPHEN_PIECES
-            and len(run) <= _MAX_HYPHEN_CHARS
-        ):
+        if len(raw) >= 2 and len(raw) <= _MAX_HYPHEN_PIECES and len(run) <= _MAX_HYPHEN_CHARS:
             joined = _join_pieces(raw, phrase_match)
         out.append(joined if joined is not None else run)
     return "".join(out)
@@ -669,10 +665,8 @@ def decoded_decisive_views(text: str) -> tuple[str, ...]:
 def encoding_surface(text: str) -> str:
     """Restore a base64 blob that was split, marked, or lookalike-folded.
 
-    Case is preserved. Leet and case-mixing of the carrier alphabet are not
-    undone: both destroy base64 bits, and guessing them would decode unrelated
-    alphabet soup. Leet or case-mix inside a payload is repaired after a
-    successful decode, on the decoded text, not by editing the carrier.
+    Preserve the case of every alphabet symbol. The decoder handles ambiguous
+    alphabet values separately, after trying the strict readings.
     """
 
     if not isinstance(text, str):

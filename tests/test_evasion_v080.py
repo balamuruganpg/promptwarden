@@ -104,12 +104,12 @@ def test_case_mixed_cyrillic_inside_encodings_flags_and_cleartext_does_not() -> 
         assert Warden().scan(text).flagged
 
 
-def test_carrier_leet_and_case_mix_still_destroy_base64_bits() -> None:
+def test_case_recovery_and_ambiguous_leet_on_the_original_carrier() -> None:
     carrier = base64.b64encode(_SENTENCE.encode()).decode()
-    for damaged in (carrier.translate(_LEET), _case_mix(carrier)):
-        assert damaged != carrier
-        assert detect(damaged) == ()
-        assert Warden().scan(damaged).flagged is False
+    assert _names(_case_mix(carrier)) == {"encoded_payload"}
+    assert Warden().scan(_case_mix(carrier)).flagged
+    assert detect(carrier.translate(_LEET)) == ()
+    assert Warden().scan(carrier.translate(_LEET)).flagged is False
 
 
 def test_intra_word_and_hyphen_newline_splits_flag() -> None:

@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from promptwarden import Warden, __version__
+from promptwarden.rules import INJECTION_SIGNALS
 
 ROOT = Path(__file__).resolve().parents[1]
 CORPUS_SHA = "8ea62c6aef2063c0d251ffd2df3bc813dab208779909a836cdb60bda3a7b2a4d"
@@ -26,6 +27,7 @@ CATALOG_SHA = "91bdb691194b51a13f70bd0d096863e2b0d4220a2d623d34f5d2487f89102b96"
 # One-based injection rows that the v0.6.0 bundled scanner missed.
 MISSED_ORIGINALS = {51, 55, 57}
 REVERSALS = {"char_reverse", "word_reverse"}
+DECISIVE = frozenset(INJECTION_SIGNALS) - {"encoded_payload"}
 LEGACY_PAIRS = {
     frozenset((left, right)): family
     for left, right, family in (
@@ -79,7 +81,9 @@ def target_pipelines(text: str) -> Iterator[tuple[str, tuple[str, ...]]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--trustbreaker", type=Path, default=ROOT.parent / "trustbreaker")
-    parser.add_argument("--suite", choices=("targets", "pairs", "historical", "all"), default="all")
+    parser.add_argument(
+        "--suite", choices=("targets", "pairs", "historical", "carriers", "all"), default="all"
+    )
     args = parser.parse_args()
     sys.path.insert(0, str(args.trustbreaker / "src"))
     from trustbreaker.operators import OPERATORS, PIPELINES
@@ -126,10 +130,30 @@ def main() -> None:
                 ):
                     fence_hits[family] += "system_fence" in result.signals
 
+    carrier_families: dict[tuple[str, ...], list[str]] = {}
+    if args.suite in ("all", "carriers"):
+        for ops in PIPELINES:
+            if "b64_wrap" in ops:
+                suffix = ops[ops.index("b64_wrap") + 1 :]
+                families = [f"depth {len(ops)} {op}" for op in ("leet", "case_mix") if op in suffix]
+                if families:
+                    carrier_families[ops] = families
+
+    originals = decisive_originals = 0
     for i, row in enumerate(rows, 1):
         if row["category"] != "injection" or i in MISSED_ORIGINALS:
             continue
         source = row["text"]
+        if carrier_families:
+            original = scan(source)
+            if not original.flagged:
+                raise ValueError("fixed carrier replay requires the flagged originals")
+            originals += 1
+            decisive = not DECISIVE.isdisjoint(original.signals)
+            decisive_originals += decisive
+            for ops, families in carrier_families.items():
+                subset = [f"{family} decisive" for family in families] if decisive else []
+                count(source, ops, *families, *subset)
         if args.suite in ("all", "targets"):
             for family, ops in target_pipelines(source):
                 count(source, ops, family)
@@ -144,6 +168,8 @@ def main() -> None:
                 if family:
                     families.append(family)
                 count(source, pair, *families)
+    if carrier_families and (originals, decisive_originals) != (78, 72):
+        raise ValueError("carrier replay source populations differ from v0.8.1")
     if args.suite in ("all", "historical"):
         # Indices into TrustBreaker's published, ordered PIPELINES tuple. The
         # frozen schedule contains no variant text or per-variant verdicts.

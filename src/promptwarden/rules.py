@@ -15,12 +15,12 @@ from __future__ import annotations
 import base64
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 from promptwarden.compose import composed_instruction_views, decoded_decisive_views, dehyphen
 from promptwarden.context import instruction_view
-from promptwarden.decoding import TOKEN_CHARS, decoded_views
+from promptwarden.decoding import TOKEN_CHARS, decoded_groups
 from promptwarden.normalize import fold_unicode, normalize
 from promptwarden.reversal import instruction_views
 
@@ -461,19 +461,29 @@ def _private_key(text: str) -> bool:
     return _PRIVATE_KEY.search(text) is not None
 
 
+def _decoded_signals(decoded: str) -> Iterator[str]:
+    contextual = instruction_view(normalize(decoded))
+    yield from (name for name in _DECISIVE_INSTRUCTIONS if _CHECKS[name](contextual))
+    for view in decoded_decisive_views(decoded):
+        if view != contextual:
+            yield from (name for name in _DECISIVE_INSTRUCTIONS if _CHECKS[name](view))
+    yield from _extra_instruction_names(decoded)
+
+
 def _encoded_payload(text: str) -> bool:
-    for decoded in decoded_views(text):
-        contextual = instruction_view(normalize(decoded))
-        if any(_CHECKS[name](contextual) for name in _DECISIVE_INSTRUCTIONS):
-            return True
-        # Deleet and casefold-first stay on text the decoder already yielded.
-        # They do not open another codec attempt.
-        if any(
-            view != contextual and any(_CHECKS[name](view) for name in _DECISIVE_INSTRUCTIONS)
-            for view in decoded_decisive_views(decoded)
-        ):
-            return True
-        if _extra_instruction_names(decoded):
+    for readings in decoded_groups(text):
+        if len(readings) == 1:
+            if any(_decoded_signals(readings[0])):
+                return True
+            continue
+        # Every plausible spelling must independently support a common rule.
+        # Never drop a quiet reading or score an ambiguous fragment in isolation.
+        common = set(_decoded_signals(readings[0]))
+        for reading in readings[1:]:
+            if not common:
+                break
+            common.intersection_update(_decoded_signals(reading))
+        if common:
             return True
     return False
 

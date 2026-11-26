@@ -176,12 +176,13 @@ def test_zero_width_word_order_inside_encodings_is_an_encoded_hit() -> None:
         assert Warden().scan(text).flagged
 
 
-def test_carrier_alphabet_leet_and_case_mix_still_destroy_base64_bits() -> None:
+def test_reported_carrier_alphabet_damage_stays_masked() -> None:
     carrier = base64.b64encode(_SENTENCE.encode()).decode()
     for damaged in (carrier.translate(_LEET), _case_mix(carrier)):
         assert damaged != carrier
-        assert detect(damaged) == ()
-        assert Warden().scan(damaged).flagged is False
+        report = f"The log recorded the exact words '{damaged}'."
+        assert detect(report) == ()
+        assert Warden().scan(report).flagged is False
 
 
 def test_isolated_leet_and_unsplit_ordinary_words_stay_quiet() -> None:

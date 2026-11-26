@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.9.0 — 2026-11-26
+
+Bounded base64 alphabet repair recovers 10 of the 78 previously missed depth-two case-mixed carriers. All 78 depth-two leet carriers still pass. At depth three, the scanner catches 69 additional case-mix variants and 3 additional leet variants on the fixed replay.
+
+### Carrier replay
+
+Counts are misses at the bundled scanner's 0.5 threshold. The source set is the 78 flagged injection originals. Its 72 decisive originals already fire an instruction rule on the source text, excluding `encoded_payload`. Each row includes every applicable catalog recipe of that depth with the named operator after `b64_wrap`. There is one such recipe per family at depth two and 31 at depth three. A recipe containing both families counts in each, so the depth-three rows overlap.
+
+| Carrier family | Population | Applicable | v0.8.1 misses | v0.9.0 misses |
+|---|---|---:|---:|---:|
+| Case mix, depth 2 | All | 78 | 78 (100%) | 68 (87.18%) |
+| | Decisive | 72 | 72 (100%) | 62 (86.11%) |
+| Leet, depth 2 | All | 78 | 78 (100%) | 78 (100%) |
+| | Decisive | 72 | 72 (100%) | 72 (100%) |
+| Case mix, depth 3 | All | 2,418 | 2,418 (100%) | 2,349 (97.15%) |
+| | Decisive | 2,232 | 2,232 (100%) | 2,163 (96.91%) |
+| Leet, depth 3 | All | 2,418 | 2,412 (99.75%) | 2,409 (99.63%) |
+| | Decisive | 2,232 | 2,227 (99.78%) | 2,224 (99.64%) |
+
+Reproduce with `PYTHONPATH=src python3 scripts/evaluate_compositions.py --suite carriers` and the adjacent TrustBreaker checkout (`46acc6c`). Point `PYTHONPATH` at a v0.8.1 checkout's `src` to reproduce the baseline (`1492159`) using the same script. The replay checks the corpus and catalog hashes. The previously reported 18.33% came from a sampled run. These fixed-family counts measure a different population.
+
+### Repair and limits
+
+The damaged symbols are usually legal base64. The strict byte decode can succeed while UTF-8 decoding fails. Each plaintext byte depends on just two adjacent six-bit values. The fallback uses that relationship and checks the unused pad bits, which avoids a whole-span search through case combinations. [RFC 4648, sections 3.5 and 4](https://www.rfc-editor.org/rfc/rfc4648.html#section-3.5)
+
+- Strict decoding across all codecs and nested layers gets the budget first. A fallback span must be a complete token within the first 16,384 characters of a masked, source-order reading. It must have at least 32 alphabet symbols and at most 256 total characters, including padding. Malformed framing and successful strict UTF-8 readings keep their existing handling.
+- The carrier must show one recognizable transformation. The fallback tries both original cases of an alternating-case letter and retains a literal digit alongside both possible letter cases for leet. It admits up to 64 substituted symbols per complete reading and up to eight readings per span. Crossing either bound discards the whole span.
+- A search, including a failed one, reserves 25 attempts and 25 times the span length in bytes. This covers nine possible adjacent symbol pairs, eight paths and eight complete readings. At most two spans can enter repair in a scan. The total limits remain 64 attempts, 32,768 candidate bytes, 4,096 characters per strict candidate and four transport layers.
+- The final reading must fit single-line ASCII prose with lowercase letters, optional initial uppercase and basic punctuation. Every reading must pass the word and spacing checks. Every reading must independently fire a common existing instruction rule with reporting and negation masks applied. Only `encoded_payload` can arise from this evidence. The classifier n-grams and PII checks still read the input. [Exact prose and alphabet conditions](SPEC.md#encoded-payloads)
+
+Most carrier damage remains open. Leet can map the canonical encodings of two different English words, such as “pal” and “pay”, to identical symbols. More attempts cannot identify the original word in that case. A quiet alternative vetoes a flag even when another reading contains a decisive instruction. Mixed-case interiors, non-ASCII or multiline payloads, intermediate repaired carriers and larger ambiguity sets fall outside this recovery pass. The synthetic leet regression demonstrates recovery on a supported input. The fixed depth-two leet result is still 0 detections out of 78.
+
+### Regression gates
+
+All 181 corpus scans and 48 default examples match v0.8.1 in score, verdict, categories and signals. Full-corpus TP / FP / TN / FN are 103 / 4 / 56 / 18, F1 0.9035 and FPR 0.0667. Injection recall is 78/81 (0.9630) and PII recall is 25/40 (0.6250). The seed-13 holdout stays at 52 / 2 / 28 / 9. The corpus was used only for measurement.
+
+The multilingual, emoji, passive, hyphenated and quoted controls retain their exact scores. In the four new ordinary-text controls, the sample JWT retains its existing PII flag at 0.9. The SHA-256 digest, PNG data URI header and UUID stay clear at 0.18605286579771854, 0.08033121717715688 and 0.1179044667658013 respectively.
+
 ## 0.8.1 — 2026-11-25
 
 Word order is restored while format characters are still word boundaries. v0.7.1 strips those characters before any reversal view, so a zero-width mark that TrustBreaker used as a separator is gone and `word_reverse` is not an involution. Fresh TrustBreaker runs against v0.7.1 and v0.8.0 left the same 237 `word_reverse` variants unflagged (237/780, 30.38%, and 237/782, 30.31%). The bundled classifier was not refit. Corpus scores are unchanged.
